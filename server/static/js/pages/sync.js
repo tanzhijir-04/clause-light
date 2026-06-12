@@ -101,21 +101,21 @@ const SyncPage = {
         <div class="config-card">
           <div class="form-group">
             <label class="form-label">服务器地址</label>
-            <input class="input" defaultValue="https://dav.jianguoyun.com/dav/" />
+            <input class="input" value="https://dav.jianguoyun.com/dav/" />
           </div>
           <div class="grid-2">
             <div class="form-group">
               <label class="form-label">用户名</label>
-              <input class="input" defaultValue="user@example.com" />
+              <input class="input" value="user@example.com" />
             </div>
             <div class="form-group">
               <label class="form-label">应用密码</label>
-              <input class="input" type="password" defaultValue="••••••••" />
+              <input class="input" type="password" value="••••••••" />
             </div>
           </div>
           <div class="form-group">
             <label class="form-label">远程路径</label>
-            <input class="input" defaultValue="/ClauseLight/" />
+            <input class="input" value="/ClauseLight/" />
           </div>
           <div style="display:flex;gap:var(--sp-2);margin-top:var(--sp-4)">
             <button class="btn btn-primary">${Icons.check(14)} 保存配置</button>
@@ -132,7 +132,7 @@ const SyncPage = {
           </div>
           <div class="form-group">
             <label class="form-label">分支</label>
-            <input class="input" defaultValue="main" />
+            <input class="input" value="main" />
           </div>
           <div class="form-group">
             <label class="form-label">访问令牌</label>
@@ -170,7 +170,7 @@ const SyncPage = {
           </div>
           <div class="form-group">
             <label class="form-label">区域</label>
-            <input class="input" defaultValue="us-east-1" />
+            <input class="input" value="us-east-1" />
           </div>
           <div style="display:flex;gap:var(--sp-2);margin-top:var(--sp-4)">
             <button class="btn btn-primary">${Icons.check(14)} 保存配置</button>
