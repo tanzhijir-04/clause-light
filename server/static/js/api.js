@@ -213,6 +213,10 @@ const API = (() => {
       if (USE_MOCK) return { success: true, latency_ms: 120, model: 'deepseek-chat', provider: 'deepseek' };
       return _fetch('/api/settings/llm/test', { method: 'POST' });
     },
+    async testLLMLocal() {
+      if (USE_MOCK) return { success: true, latency_ms: 50, models: ['qwen2.5:7b', 'qwen2.5:32b'], endpoint: 'http://localhost:11434' };
+      return _fetch('/api/settings/llm/test-local', { method: 'POST' });
+    },
     async devices() {
       if (USE_MOCK) return MOCK_DEVICES;
       return _fetch('/api/devices');

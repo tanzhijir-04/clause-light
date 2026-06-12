@@ -322,6 +322,49 @@ async def test_llm_connection():
         }
 
 
+@app.post("/api/settings/llm/test-local")
+async def test_local_llm_connection():
+    """测试本地 Ollama 连接性"""
+    import time
+
+    import httpx
+
+    config = _load_llm_config()
+    local = config.get("local", {})
+    endpoint = local.get("endpoint", "http://localhost:11434")
+
+    start = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{endpoint}/api/tags")
+            resp.raise_for_status()
+            data = resp.json()
+            latency = int((time.monotonic() - start) * 1000)
+            models = [m.get("name", "") for m in data.get("models", [])]
+            return {
+                "success": True,
+                "latency_ms": latency,
+                "models": models,
+                "endpoint": endpoint,
+            }
+    except httpx.ConnectError:
+        latency = int((time.monotonic() - start) * 1000)
+        return {
+            "success": False,
+            "latency_ms": latency,
+            "error": f"无法连接到 Ollama（{endpoint}），请确认 Ollama 已启动",
+            "endpoint": endpoint,
+        }
+    except Exception as e:
+        latency = int((time.monotonic() - start) * 1000)
+        return {
+            "success": False,
+            "latency_ms": latency,
+            "error": str(e),
+            "endpoint": endpoint,
+        }
+
+
 # ── 静态文件挂载 ──
 
 # 前端管理面板

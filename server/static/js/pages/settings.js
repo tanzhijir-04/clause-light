@@ -105,6 +105,13 @@ const SettingsPage = {
               <input id="llm-explain" class="input" value="${remoteModels.explain || 'deepseek-chat'}" />
             </div>
           </div>
+          <div style="display:flex;align-items:center;gap:var(--sp-3);margin-top:var(--sp-4);padding-top:var(--sp-4);border-top:1px solid var(--border-default)">
+            <button class="btn btn-secondary btn-sm" onclick="SettingsPage.testRemote()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              测试连接
+            </button>
+            <span id="remote-test-result" style="font-size:var(--text-xs)"></span>
+          </div>
         </div>
 
         <!-- 本地模型 -->
@@ -132,13 +139,18 @@ const SettingsPage = {
               <input id="llm-local-explain" class="input" value="${localModels.explain || 'qwen2.5:7b'}" />
             </div>
           </div>
+          <div style="display:flex;align-items:center;gap:var(--sp-3);margin-top:var(--sp-4);padding-top:var(--sp-4);border-top:1px solid var(--border-default)">
+            <button class="btn btn-secondary btn-sm" onclick="SettingsPage.testLocal()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              测试连接
+            </button>
+            <span id="local-test-result" style="font-size:var(--text-xs)"></span>
+          </div>
         </div>
 
         <div style="display:flex;align-items:center;gap:var(--sp-3)">
           <button class="btn btn-primary" onclick="SettingsPage.saveLLM()">保存配置</button>
-          <button class="btn btn-secondary" id="btn-test-llm" onclick="SettingsPage.testConnection()">测试连接</button>
           <span id="llm-save-status" style="font-size:var(--text-xs);color:var(--text-tertiary)"></span>
-          <span id="llm-test-result" style="font-size:var(--text-xs)"></span>
         </div>
       </div>
 
@@ -284,9 +296,9 @@ const SettingsPage = {
   },
 
   /** 测试远程 API 连接 */
-  async testConnection() {
-    const btn = document.getElementById('btn-test-llm');
-    const resultEl = document.getElementById('llm-test-result');
+  async testRemote() {
+    const btn = document.querySelector('[onclick="SettingsPage.testRemote()"]');
+    const resultEl = document.getElementById('remote-test-result');
     if (btn) btn.disabled = true;
     if (resultEl) {
       resultEl.textContent = '测试中...';
@@ -308,6 +320,49 @@ const SettingsPage = {
         }
         if (resultEl) {
           resultEl.innerHTML = `✓ 连接成功 — ${res.model} — <span style="color:${color}">${label}</span>`;
+        }
+      } else {
+        if (resultEl) {
+          resultEl.innerHTML = `<span style="color:var(--risk-red)">✗ ${res.error || '连接失败'}</span>`;
+        }
+      }
+    } catch (e) {
+      if (resultEl) {
+        resultEl.innerHTML = `<span style="color:var(--risk-red)">✗ ${e.message}</span>`;
+      }
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  },
+
+  /** 测试本地 Ollama 连接 */
+  async testLocal() {
+    const btn = document.querySelector('[onclick="SettingsPage.testLocal()"]');
+    const resultEl = document.getElementById('local-test-result');
+    if (btn) btn.disabled = true;
+    if (resultEl) {
+      resultEl.textContent = '测试中...';
+      resultEl.style.color = 'var(--text-tertiary)';
+    }
+
+    try {
+      const res = await API.settings.testLLMLocal();
+      if (res.success) {
+        const latency = res.latency_ms;
+        let color = 'var(--risk-green)';
+        let label = `${latency}ms`;
+        if (latency > 3000) {
+          color = 'var(--risk-red)';
+          label = `${latency}ms（慢）`;
+        } else if (latency > 1000) {
+          color = 'var(--risk-yellow)';
+          label = `${latency}ms（较慢）`;
+        }
+        const count = res.models ? res.models.length : 0;
+        const modelInfo = count > 0 ? ` — 已安装 ${count} 个模型` : '';
+        if (resultEl) {
+          resultEl.innerHTML = `✓ 连接成功${modelInfo} — <span style="color:${color}">${label}</span>`;
+          resultEl.style.color = '';
         }
       } else {
         if (resultEl) {
