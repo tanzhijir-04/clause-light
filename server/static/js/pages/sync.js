@@ -188,22 +188,21 @@ const SyncPage = {
 
   async manualPush() {
     const res = await API.sync.push();
-    if (res && res.success) alert('上传成功');
+    if (res && res.success) Components.toast('上传成功', 'success');
   },
 
   async manualPull() {
     const res = await API.sync.pull();
-    if (res && res.success) alert('下载成功');
+    if (res && res.success) Components.toast('下载成功', 'success');
   },
 
   async saveConfig() {
     const res = await API.sync.updateConfig({ service: this._selectedService });
-    if (res && res.success) alert('配置已保存');
+    if (res && res.success) Components.toast('配置已保存', 'success');
   },
 
   async testConnection() {
-    alert('正在测试连接...');
-    // 模拟测试延迟
-    setTimeout(() => alert('连接测试成功（mock）'), 1000);
+    Components.toast('正在测试连接...', 'info', 2000);
+    setTimeout(() => Components.toast('连接测试成功（mock）', 'success'), 1000);
   },
 };

@@ -168,20 +168,20 @@ const SettingsPage = {
   },
 
   exportData() {
-    alert('导出功能将在后端 API 实现后可用');
+    Components.toast('导出功能将在后端 API 实现后可用', 'info');
   },
 
   backupDb() {
-    alert('备份功能将在后端 API 实现后可用');
+    Components.toast('备份功能将在后端 API 实现后可用', 'info');
   },
 
   rebuildIndex() {
-    alert('重建索引功能将在后端 API 实现后可用');
+    Components.toast('重建索引功能将在后端 API 实现后可用', 'info');
   },
 
   clearData() {
     if (confirm('确定要清除所有数据吗？此操作不可恢复！')) {
-      alert('清除功能将在后端 API 实现后可用');
+      Components.toast('清除功能将在后端 API 实现后可用', 'info');
     }
   },
 };

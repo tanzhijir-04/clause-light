@@ -27,6 +27,24 @@ const App = (() => {
     const sidebarRoute = route === 'contractDetail' ? 'contracts' : route;
     const sidebarHtml = Components.Sidebar(sidebarRoute);
 
+    // 先显示 loading 状态
+    app.innerHTML = `
+      ${sidebarHtml}
+      <div class="main-content">
+        <div class="page-loading">
+          <div class="spinner"></div>
+          <span>加载中...</span>
+        </div>
+      </div>`;
+
+    // 绑定侧边栏导航事件（loading 时也可点击）
+    app.querySelectorAll('.sidebar-nav-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const page = item.getAttribute('data-page');
+        if (page) Router.navigate(page);
+      });
+    });
+
     // 渲染页面内容
     let contentHtml = '';
     try {
@@ -36,11 +54,11 @@ const App = (() => {
       contentHtml = `<div class="empty-state">加载失败，请刷新页面</div>`;
     }
 
-    app.innerHTML = `
-      ${sidebarHtml}
-      <div class="main-content">
-        ${contentHtml}
-      </div>`;
+    // 更新内容区（保留侧边栏）
+    const mainContent = app.querySelector('.main-content');
+    if (mainContent) {
+      mainContent.innerHTML = contentHtml;
+    }
 
     // 绑定侧边栏导航事件
     app.querySelectorAll('.sidebar-nav-item').forEach(item => {

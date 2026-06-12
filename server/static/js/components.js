@@ -153,9 +153,42 @@ const Components = (() => {
     </div>`;
   }
 
+  /** Toast 通知 */
+  function _ensureToastContainer() {
+    let container = document.querySelector('.toast-container');
+    if (!container) {
+      container = document.createElement('div');
+      container.className = 'toast-container';
+      document.body.appendChild(container);
+    }
+    return container;
+  }
+
+  function toast(message, type = 'info', duration = 3000) {
+    const container = _ensureToastContainer();
+    const iconMap = {
+      success: Icons.check(16),
+      error: Icons.x(16),
+      info: Icons.info(16),
+    };
+    const el = document.createElement('div');
+    el.className = `toast ${type}`;
+    el.innerHTML = `
+      <span class="toast-icon">${iconMap[type] || iconMap.info}</span>
+      <span class="toast-message">${message}</span>
+      <span class="toast-close" onclick="this.parentElement.remove()">${Icons.x(14)}</span>`;
+    container.appendChild(el);
+    if (duration > 0) {
+      setTimeout(() => {
+        el.style.animation = 'toastOut 0.2s ease-out forwards';
+        setTimeout(() => el.remove(), 200);
+      }, duration);
+    }
+  }
+
   return {
     RiskBadge, StatCard, RiskDistBar, ScoreRing, Toggle,
     onToggle, handleToggle, ProgressBar, UploadZone, handleFileUpload,
-    Sidebar,
+    Sidebar, toast,
   };
 })();
