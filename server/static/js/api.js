@@ -209,6 +209,10 @@ const API = (() => {
       if (USE_MOCK) return { success: true };
       return _fetch('/api/settings/llm', { method: 'PUT', body: JSON.stringify(data) });
     },
+    async testLLM() {
+      if (USE_MOCK) return { success: true, latency_ms: 120, model: 'deepseek-chat', provider: 'deepseek' };
+      return _fetch('/api/settings/llm/test', { method: 'POST' });
+    },
     async devices() {
       if (USE_MOCK) return MOCK_DEVICES;
       return _fetch('/api/devices');

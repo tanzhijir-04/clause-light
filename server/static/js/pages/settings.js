@@ -136,7 +136,9 @@ const SettingsPage = {
 
         <div style="display:flex;align-items:center;gap:var(--sp-3)">
           <button class="btn btn-primary" onclick="SettingsPage.saveLLM()">保存配置</button>
+          <button class="btn btn-secondary" id="btn-test-llm" onclick="SettingsPage.testConnection()">测试连接</button>
           <span id="llm-save-status" style="font-size:var(--text-xs);color:var(--text-tertiary)"></span>
+          <span id="llm-test-result" style="font-size:var(--text-xs)"></span>
         </div>
       </div>
 
@@ -278,6 +280,46 @@ const SettingsPage = {
       if (!silent) {
         Components.toast('保存失败: ' + e.message, 'error');
       }
+    }
+  },
+
+  /** 测试远程 API 连接 */
+  async testConnection() {
+    const btn = document.getElementById('btn-test-llm');
+    const resultEl = document.getElementById('llm-test-result');
+    if (btn) btn.disabled = true;
+    if (resultEl) {
+      resultEl.textContent = '测试中...';
+      resultEl.style.color = 'var(--text-tertiary)';
+    }
+
+    try {
+      const res = await API.settings.testLLM();
+      if (res.success) {
+        const latency = res.latency_ms;
+        let color = 'var(--risk-green)';
+        let label = `${latency}ms`;
+        if (latency > 3000) {
+          color = 'var(--risk-red)';
+          label = `${latency}ms（慢）`;
+        } else if (latency > 1000) {
+          color = 'var(--risk-yellow)';
+          label = `${latency}ms（较慢）`;
+        }
+        if (resultEl) {
+          resultEl.innerHTML = `✓ 连接成功 — ${res.model} — <span style="color:${color}">${label}</span>`;
+        }
+      } else {
+        if (resultEl) {
+          resultEl.innerHTML = `<span style="color:var(--risk-red)">✗ ${res.error || '连接失败'}</span>`;
+        }
+      }
+    } catch (e) {
+      if (resultEl) {
+        resultEl.innerHTML = `<span style="color:var(--risk-red)">✗ ${e.message}</span>`;
+      }
+    } finally {
+      if (btn) btn.disabled = false;
     }
   },
 

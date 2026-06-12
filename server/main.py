@@ -280,6 +280,48 @@ async def update_llm_settings(request: Request):
     return {"success": True}
 
 
+@app.post("/api/settings/llm/test")
+async def test_llm_connection():
+    """测试远程 API 连接性，返回延迟"""
+    import time
+
+    from openai import AsyncOpenAI
+
+    config = _load_llm_config()
+    remote = config.get("remote", {})
+    api_key = remote.get("apiKey", "")
+    base_url = remote.get("baseUrl", "")
+    model = remote.get("models", {}).get("classify", "deepseek-chat")
+
+    if not api_key:
+        return {"success": False, "error": "未配置 API Key"}
+
+    client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=30.0)
+
+    start = time.monotonic()
+    try:
+        resp = await client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=1,
+        )
+        latency = int((time.monotonic() - start) * 1000)
+        return {
+            "success": True,
+            "latency_ms": latency,
+            "model": resp.model or model,
+            "provider": remote.get("provider", "unknown"),
+        }
+    except Exception as e:
+        latency = int((time.monotonic() - start) * 1000)
+        return {
+            "success": False,
+            "latency_ms": latency,
+            "error": str(e),
+            "provider": remote.get("provider", "unknown"),
+        }
+
+
 # ── 静态文件挂载 ──
 
 # 前端管理面板
