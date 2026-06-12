@@ -1,4 +1,4 @@
-# ClauseLight（合同红绿灯）
+# 合同红绿灯
 
 > 拍照上传合同，红黄绿三色标注风险，告诉你哪些条款对你不利、建议怎么改。
 
@@ -18,7 +18,7 @@
 ### 安装
 
 ```bash
-git clone https://github.com/your-username/clause-light.git
+git clone https://github.com/tanzhijir-04/clause-light.git
 cd clause-light
 pip install -r requirements.txt
 ```
