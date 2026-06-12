@@ -6,7 +6,12 @@ const ContractsPage = {
   _typeFilter: '',
   _riskFilter: '',
 
-  async render() {
+  async render(params = {}) {
+    // 如果有 id 参数，委托给合同详情页渲染
+    if (params.id) {
+      return ContractDetailPage.render(params);
+    }
+
     const contracts = await API.contracts.list({
       search: this._searchTerm,
       type: this._typeFilter,

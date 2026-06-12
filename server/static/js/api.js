@@ -129,6 +129,15 @@ const API = (() => {
       // 不设置 Content-Type，让浏览器自动设置 multipart/form-data boundary
       return _fetch('/api/contracts/analyze', { method: 'POST', body: form, headers: {} });
     },
+    async feedback(contractId, clauseAnalysisId, feedback) {
+      if (USE_MOCK) return { success: true };
+      const form = new URLSearchParams({ clause_analysis_id: clauseAnalysisId, feedback });
+      return _fetch(`/api/contracts/${contractId}/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: form,
+      });
+    },
   };
 
   /** 知识库相关 API */

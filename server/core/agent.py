@@ -40,6 +40,7 @@ class AnalysisResult:
     green_count: int = 0
     needs_review: list[str] = field(default_factory=list)
     top_risks: list[str] = field(default_factory=list)
+    ocr_text: str = ""  # OCR 识别的合同全文（用于原文标注视图）
     error: str = ""  # 分析失败时的错误信息，调用方可据此判断成功/失败
 
 
@@ -88,6 +89,7 @@ class ContractAgent:
                 result.error = "OCR 识别结果为空，无法分析"
                 return result
             full_text = ocr_result.full_text
+            result.ocr_text = full_text  # 保存原文供前端标注视图使用
 
             # 检查 OCR 质量
             if ocr_result.confidence_avg < 0.7:

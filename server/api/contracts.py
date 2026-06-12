@@ -174,6 +174,7 @@ async def get_contract(
         "model": analysis.model_used if analysis else "",
         "summary": analysis.summary if analysis else "",
         "recommendation": analysis.recommendation if analysis else "",
+        "fullText": contract.ocr_text or "",
         "clauses": clauses_data,
     }
 
@@ -240,6 +241,10 @@ async def analyze_contract(
             "contractId": contract.id,
             "error": result.error,
         }
+
+    # 保存 OCR 原文到合同记录（用于原文标注视图）
+    if result.ocr_text:
+        contract.ocr_text = result.ocr_text
 
     # 保存分析结果
     if result.contract_id:

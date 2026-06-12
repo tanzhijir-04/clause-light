@@ -220,9 +220,40 @@ const Components = (() => {
     }
   }
 
+  /** 可交互风险分布条（带点击筛选） */
+  function RiskDistInteractive(red, yellow, green, filter, onFilter) {
+    const total = red + yellow + green;
+    if (total === 0) return '';
+    return `<div style="display:flex;align-items:center;gap:var(--sp-3)">
+      <div class="risk-dist-interactive" style="flex:1">
+        ${red > 0 ? `<div class="risk-dist-seg red ${filter && filter !== 'red' ? 'dim' : ''}" style="width:${(red/total)*100}%" data-risk="red" onclick="${onFilter}('red')"></div>` : ''}
+        ${yellow > 0 ? `<div class="risk-dist-seg yellow ${filter && filter !== 'yellow' ? 'dim' : ''}" style="width:${(yellow/total)*100}%" data-risk="yellow" onclick="${onFilter}('yellow')"></div>` : ''}
+        ${green > 0 ? `<div class="risk-dist-seg green ${filter && filter !== 'green' ? 'dim' : ''}" style="width:${(green/total)*100}%" data-risk="green" onclick="${onFilter}('green')"></div>` : ''}
+      </div>
+      <div style="display:flex;gap:12px;font-size:11px;color:var(--text-secondary);white-space:nowrap">
+        <span style="color:var(--risk-red);font-weight:${filter==='red'?700:400};cursor:pointer" onclick="${onFilter}('red')">红 ${red}</span>
+        <span style="color:var(--risk-yellow);font-weight:${filter==='yellow'?700:400};cursor:pointer" onclick="${onFilter}('yellow')">黄 ${yellow}</span>
+        <span style="color:var(--risk-green);font-weight:${filter==='green'?700:400};cursor:pointer" onclick="${onFilter}('green')">绿 ${green}</span>
+      </div>
+    </div>`;
+  }
+
+  /** 严重度条（10 格） */
+  function SeverityBar(score, maxScore = 10) {
+    const color = score >= 7 ? 'var(--risk-red)' : score >= 4 ? 'var(--risk-yellow)' : 'var(--risk-green)';
+    let blocks = '';
+    for (let i = 0; i < maxScore; i++) {
+      blocks += `<div class="severity-block" style="${i < score ? 'background:' + color : ''}"></div>`;
+    }
+    return `<div class="severity-bar">
+      <div class="severity-blocks">${blocks}</div>
+      <span class="severity-text">${score}/${maxScore}</span>
+    </div>`;
+  }
+
   return {
     RiskBadge, StatCard, RiskDistBar, ScoreRing, Toggle,
     onToggle, handleToggle, ProgressBar, UploadZone, handleFileUpload,
-    Sidebar, toast,
+    Sidebar, toast, RiskDistInteractive, SeverityBar,
   };
 })();
