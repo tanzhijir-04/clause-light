@@ -2,6 +2,10 @@
  * 设置页面
  */
 const SettingsPage = {
+  /** 开关状态 */
+  _remoteEnabled: false,
+  _localEnabled: false,
+
   async render() {
     const llmConfig = await API.settings.llm();
     const devices = await API.settings.devices();
@@ -32,14 +36,14 @@ const SettingsPage = {
     });
 
     // 远程 API 配置
-    const remoteEnabled = llmConfig.remote?.enabled !== false;
     const remote = llmConfig.remote || {};
     const remoteModels = remote.models || {};
+    SettingsPage._remoteEnabled = remote.enabled !== false;
 
     // 本地模型配置
-    const localEnabled = llmConfig.local?.enabled === true;
     const local = llmConfig.local || {};
     const localModels = local.models || {};
+    SettingsPage._localEnabled = local.enabled === true;
 
     return `
       <div class="content-header animate-in">
@@ -55,69 +59,71 @@ const SettingsPage = {
         <div class="config-card" style="margin-bottom:var(--sp-4)">
           <div class="config-card-header">
             <div class="config-card-title">远程 API</div>
-            ${Components.Toggle('llm-remote', remoteEnabled)}
+            ${Components.Toggle('llm-remote', SettingsPage._remoteEnabled)}
           </div>
           <div class="config-card-desc">使用 OpenAI 兼容格式的云端 API（DeepSeek / OpenAI / 通义千问等）</div>
           <div class="form-group">
             <label class="form-label">提供商</label>
-            <select class="select" style="width:100%">
-              <option ${remote.provider === 'deepseek' ? 'selected' : ''}>DeepSeek</option>
-              <option ${remote.provider === 'openai' ? 'selected' : ''}>OpenAI</option>
-              <option ${remote.provider === 'qwen' ? 'selected' : ''}>通义千问</option>
-              <option>自定义</option>
+            <select id="llm-provider" class="select" style="width:100%">
+              <option value="deepseek" ${remote.provider === 'deepseek' ? 'selected' : ''}>DeepSeek</option>
+              <option value="openai" ${remote.provider === 'openai' ? 'selected' : ''}>OpenAI</option>
+              <option value="qwen" ${remote.provider === 'qwen' ? 'selected' : ''}>通义千问</option>
+              <option value="custom">自定义</option>
             </select>
           </div>
           <div class="form-group">
             <label class="form-label">API Base URL</label>
-            <input class="input" value="${remote.baseUrl || 'https://api.deepseek.com/v1'}" />
+            <input id="llm-baseUrl" class="input" value="${remote.baseUrl || 'https://api.deepseek.com/v1'}" />
           </div>
           <div class="form-group">
             <label class="form-label">API Key</label>
-            <input class="input" type="password" value="${remote.apiKey || ''}" placeholder="sk-..." />
+            <input id="llm-apiKey" class="input" type="password" value="${remote.apiKey || ''}" placeholder="sk-..." />
             <div class="form-hint">API Key 仅存储在本地，不会上传到任何服务器</div>
           </div>
           <div class="grid-3">
             <div class="form-group">
               <label class="form-label">分类模型</label>
-              <input class="input" value="${remoteModels.classify || 'deepseek-chat'}" />
+              <input id="llm-classify" class="input" value="${remoteModels.classify || 'deepseek-chat'}" />
             </div>
             <div class="form-group">
               <label class="form-label">分析模型</label>
-              <input class="input" value="${remoteModels.analyze || 'deepseek-chat'}" />
+              <input id="llm-analyze" class="input" value="${remoteModels.analyze || 'deepseek-chat'}" />
             </div>
             <div class="form-group">
               <label class="form-label">解释模型</label>
-              <input class="input" value="${remoteModels.explain || 'deepseek-chat'}" />
+              <input id="llm-explain" class="input" value="${remoteModels.explain || 'deepseek-chat'}" />
             </div>
           </div>
         </div>
 
         <!-- 本地模型 -->
-        <div class="config-card">
+        <div class="config-card" style="margin-bottom:var(--sp-4)">
           <div class="config-card-header">
             <div class="config-card-title">本地模型（Ollama）</div>
-            ${Components.Toggle('llm-local', localEnabled)}
+            ${Components.Toggle('llm-local', SettingsPage._localEnabled)}
           </div>
           <div class="config-card-desc">使用 Ollama 运行本地大模型，无需网络，数据完全不出本机</div>
           <div class="form-group">
             <label class="form-label">Ollama 地址</label>
-            <input class="input" value="${local.endpoint || 'http://localhost:11434'}" />
+            <input id="llm-local-endpoint" class="input" value="${local.endpoint || 'http://localhost:11434'}" />
           </div>
           <div class="grid-3">
             <div class="form-group">
               <label class="form-label">分类模型</label>
-              <input class="input" value="${localModels.classify || 'qwen2.5:7b'}" />
+              <input id="llm-local-classify" class="input" value="${localModels.classify || 'qwen2.5:7b'}" />
             </div>
             <div class="form-group">
               <label class="form-label">分析模型</label>
-              <input class="input" value="${localModels.analyze || 'qwen2.5:32b'}" />
+              <input id="llm-local-analyze" class="input" value="${localModels.analyze || 'qwen2.5:32b'}" />
             </div>
             <div class="form-group">
               <label class="form-label">解释模型</label>
-              <input class="input" value="${localModels.explain || 'qwen2.5:7b'}" />
+              <input id="llm-local-explain" class="input" value="${localModels.explain || 'qwen2.5:7b'}" />
             </div>
           </div>
         </div>
+
+        <button class="btn btn-primary" onclick="SettingsPage.saveLLM()">保存配置</button>
       </div>
 
       <div class="section">
@@ -167,6 +173,49 @@ const SettingsPage = {
         </div>
       </div>
       </div>`;
+  },
+
+  /** 初始化 Toggle 回调（页面渲染后调用） */
+  initToggles() {
+    Components.onToggle('llm-remote', (on) => {
+      SettingsPage._remoteEnabled = on;
+    });
+    Components.onToggle('llm-local', (on) => {
+      SettingsPage._localEnabled = on;
+    });
+  },
+
+  /** 保存 LLM 配置 */
+  async saveLLM() {
+    const data = {
+      remote: {
+        enabled: SettingsPage._remoteEnabled,
+        provider: document.getElementById('llm-provider')?.value || 'deepseek',
+        baseUrl: document.getElementById('llm-baseUrl')?.value || '',
+        apiKey: document.getElementById('llm-apiKey')?.value || '',
+        models: {
+          classify: document.getElementById('llm-classify')?.value || '',
+          analyze: document.getElementById('llm-analyze')?.value || '',
+          explain: document.getElementById('llm-explain')?.value || '',
+        },
+      },
+      local: {
+        enabled: SettingsPage._localEnabled,
+        endpoint: document.getElementById('llm-local-endpoint')?.value || '',
+        models: {
+          classify: document.getElementById('llm-local-classify')?.value || '',
+          analyze: document.getElementById('llm-local-analyze')?.value || '',
+          explain: document.getElementById('llm-local-explain')?.value || '',
+        },
+      },
+    };
+
+    try {
+      await API.settings.updateLLM(data);
+      Components.toast('配置已保存', 'success');
+    } catch (e) {
+      Components.toast('保存失败: ' + e.message, 'error');
+    }
   },
 
   exportData() {

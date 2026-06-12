@@ -72,6 +72,9 @@ const App = (() => {
     // 滚动到顶部
     const contentBody = app.querySelector('.content-body');
     if (contentBody) contentBody.scrollTop = 0;
+
+    // 页面特定的后渲染初始化
+    if (page.initToggles) page.initToggles();
   }
 
   /** 渲染当前页面（用于状态更新时重新渲染） */
