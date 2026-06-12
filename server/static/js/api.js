@@ -74,9 +74,14 @@ const API = (() => {
   /** 通用 fetch 封装 */
   async function _fetch(url, options = {}) {
     try {
+      // 如果是 FormData，不设置 Content-Type，让浏览器自动设置 multipart/form-data
+      const isFormData = options.body instanceof FormData;
+      const defaultHeaders = isFormData ? {} : { 'Content-Type': 'application/json' };
+      const headers = { ...defaultHeaders, ...options.headers };
+
       const res = await fetch(url, {
-        headers: { 'Content-Type': 'application/json', ...options.headers },
         ...options,
+        headers,
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -121,6 +126,7 @@ const API = (() => {
       if (USE_MOCK) return { success: true, message: '分析完成（mock）' };
       const form = new FormData();
       form.append('file', file);
+      // 不设置 Content-Type，让浏览器自动设置 multipart/form-data boundary
       return _fetch('/api/contracts/analyze', { method: 'POST', body: form, headers: {} });
     },
   };

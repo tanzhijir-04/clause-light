@@ -95,11 +95,36 @@ const Components = (() => {
   function handleFileUpload(input) {
     const file = input.files[0];
     if (file) {
-      API.contracts.analyze(file).then(res => {
-        if (res && res.success) {
-          alert('上传成功：' + file.name);
-        }
-      });
+      // 显示 loading 状态
+      const uploadZone = document.getElementById('upload-zone');
+      const originalContent = uploadZone ? uploadZone.innerHTML : '';
+      if (uploadZone) {
+        uploadZone.innerHTML = `
+          <div class="spinner"></div>
+          <div class="upload-zone-title">正在分析合同...</div>
+          <div class="upload-zone-hint">OCR 识别 + AI 分析中，请稍候</div>
+        `;
+      }
+
+      API.contracts.analyze(file)
+        .then(res => {
+          if (res && res.success) {
+            toast('合同分析完成：' + file.name, 'success');
+            // 刷新页面
+            setTimeout(() => App.renderCurrentPage(), 1000);
+          } else {
+            toast('分析失败：' + (res?.detail || '未知错误'), 'error');
+            if (uploadZone) uploadZone.innerHTML = originalContent;
+          }
+        })
+        .catch(err => {
+          toast('上传失败：' + err.message, 'error');
+          if (uploadZone) uploadZone.innerHTML = originalContent;
+        })
+        .finally(() => {
+          // 清空 input 以便再次选择同一文件
+          input.value = '';
+        });
     }
   }
 

@@ -87,13 +87,44 @@ const ContractDetailPage = {
         <div class="card">
           <div class="card-header">
             <h3>风险条款分析</h3>
-            <span class="table-cell-secondary">共 ${contract.redCount + contract.yellowCount + contract.greenCount} 条</span>
+            <span class="table-cell-secondary">共 ${contract.clauses ? contract.clauses.length : 0} 条</span>
           </div>
           <div class="card-body">
-            <div class="empty-state" style="padding:var(--sp-8)">
-              ${Icons.shield(48)}
-              <p style="color:var(--text-secondary)">条款详细分析将在后端 API 实现后展示</p>
-            </div>
+            ${contract.clauses && contract.clauses.length > 0 ? `
+              <div class="clause-list">
+                ${contract.clauses.map(clause => {
+                  const riskColor = clause.riskLevel === 'red' ? 'var(--risk-red)' :
+                                   clause.riskLevel === 'yellow' ? 'var(--risk-yellow)' : 'var(--risk-green)';
+                  const riskLabel = clause.riskLevel === 'red' ? '高风险' :
+                                   clause.riskLevel === 'yellow' ? '中风险' : '低风险';
+                  return `
+                    <div class="clause-item" style="border-left:3px solid ${riskColor};padding:var(--sp-4);margin-bottom:var(--sp-3);background:var(--bg-secondary);border-radius:var(--radius)">
+                      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--sp-2)">
+                        <div style="font-weight:600">${clause.clauseNumber || '条款'}</div>
+                        <span style="color:${riskColor};font-size:var(--text-sm);font-weight:500">${riskLabel}</span>
+                      </div>
+                      <div style="font-size:var(--text-sm);color:var(--text-secondary);margin-bottom:var(--sp-2)">${clause.clauseTitle || ''}</div>
+                      <div style="font-size:var(--text-sm);margin-bottom:var(--sp-2)">${clause.riskSummary || '本维度无明显风险'}</div>
+                      ${clause.suggestedClause ? `
+                        <div style="font-size:var(--text-sm);color:var(--primary);background:var(--bg-primary);padding:var(--sp-2);border-radius:var(--radius)">
+                          <strong>修改建议：</strong>${clause.suggestedClause}
+                        </div>
+                      ` : ''}
+                      ${clause.legalBasis ? `
+                        <div style="font-size:var(--text-xs);color:var(--text-tertiary);margin-top:var(--sp-2)">
+                          法律依据：${clause.legalBasis}
+                        </div>
+                      ` : ''}
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            ` : `
+              <div class="empty-state" style="padding:var(--sp-8)">
+                ${Icons.shield(48)}
+                <p style="color:var(--text-secondary)">暂无条款分析结果</p>
+              </div>
+            `}
           </div>
         </div>
       </div>`;

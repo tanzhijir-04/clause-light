@@ -217,10 +217,16 @@ async def analyze_contract(
 
     # 执行 7 步分析
     agent = ContractAgent()
-    result = await agent.analyze(
-        file_path=file_path,
-        contract_type_hint=contract_type if contract_type else None,
-    )
+    try:
+        result = await agent.analyze(
+            file_path=file_path,
+            contract_type_hint=contract_type if contract_type else None,
+        )
+    except Exception as e:
+        logger.error("合同分析失败: %s", e)
+        # 提交合同记录（即使分析失败）
+        await db.commit()
+        raise HTTPException(status_code=500, detail=f"合同分析失败: {str(e)}")
 
     # 保存分析结果
     if result.contract_id:
@@ -259,8 +265,8 @@ async def analyze_contract(
         contract.type = result.contract_type
         contract.updated_at = datetime.now(timezone.utc)
 
-        # 显式提交，确保分析结果持久化
-        await db.commit()
+    # 显式提交，确保合同记录和分析结果都持久化
+    await db.commit()
 
     return {
         "success": True,

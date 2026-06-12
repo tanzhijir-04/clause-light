@@ -60,37 +60,110 @@ class LLMGateway:
 
     def __init__(self) -> None:
         self._clients: dict[str, AsyncOpenAI] = {}
+        self._config_loaded = False
         self._init_clients()
+
+    def _load_config_from_file(self) -> dict:
+        """从配置文件加载 LLM 设置"""
+        import json
+        import os
+
+        config_file = os.path.join("data", "llm_config.json")
+        default_config = {
+            "remote": {
+                "enabled": bool(settings.LLM_DEEPSEEK_API_KEY),
+                "provider": "deepseek" if settings.LLM_DEEPSEEK_API_KEY else "openai",
+                "baseUrl": "https://api.deepseek.com/v1",
+                "apiKey": settings.LLM_DEEPSEEK_API_KEY or "",
+                "models": {
+                    "classify": "deepseek-chat",
+                    "analyze": "deepseek-chat",
+                    "explain": "deepseek-chat",
+                },
+            },
+            "local": {
+                "enabled": False,
+                "endpoint": settings.OLLAMA_ENDPOINT,
+                "models": {
+                    "classify": "qwen2.5:7b",
+                    "analyze": "qwen2.5:32b",
+                    "explain": "qwen2.5:7b",
+                },
+            },
+        }
+
+        if os.path.exists(config_file):
+            try:
+                with open(config_file, "r", encoding="utf-8") as f:
+                    saved = json.load(f)
+                    # 深合并
+                    for key in ["remote", "local"]:
+                        if key in saved and key in default_config:
+                            default_config[key].update(saved[key])
+            except Exception as e:
+                logger.warning("加载 LLM 配置文件失败: %s", e)
+
+        return default_config
 
     def _init_clients(self) -> None:
         """初始化各提供商的 OpenAI 兼容客户端"""
-        providers_config = {
-            "deepseek": {
-                "api_key": settings.LLM_DEEPSEEK_API_KEY,
-                "base_url": "https://api.deepseek.com/v1",
-            },
-            "openai": {
-                "api_key": settings.LLM_OPENAI_API_KEY,
-                "base_url": "https://api.openai.com/v1",
-            },
-        }
-        for name, cfg in providers_config.items():
-            if cfg["api_key"]:
-                self._clients[name] = AsyncOpenAI(
-                    api_key=cfg["api_key"],
-                    base_url=cfg["base_url"],
-                    timeout=120.0,
-                )
-                logger.info("LLM 提供商已初始化: %s", name)
+        # 从配置文件读取（优先级更高）
+        config = self._load_config_from_file()
 
-        # Ollama（本地模型）
-        if settings.OLLAMA_ENDPOINT:
+        # 远程 API
+        remote = config.get("remote", {})
+        if remote.get("enabled") and remote.get("apiKey"):
+            provider = remote.get("provider", "deepseek")
+            base_url = remote.get("baseUrl", "https://api.deepseek.com/v1")
+            self._clients[provider] = AsyncOpenAI(
+                api_key=remote["apiKey"],
+                base_url=base_url,
+                timeout=120.0,
+            )
+            logger.info("LLM 远程提供商已初始化: %s (base_url=%s)", provider, base_url)
+
+        # 本地 Ollama
+        local = config.get("local", {})
+        if local.get("enabled"):
+            endpoint = local.get("endpoint", settings.OLLAMA_ENDPOINT)
             self._clients["ollama"] = AsyncOpenAI(
                 api_key="ollama",
-                base_url=settings.OLLAMA_ENDPOINT + "/v1",
+                base_url=endpoint + "/v1",
                 timeout=300.0,
             )
-            logger.info("LLM 本地模型已初始化: ollama")
+            logger.info("LLM 本地模型已初始化: ollama (endpoint=%s)", endpoint)
+
+        # 如果没有从配置文件加载到，使用默认配置
+        if not self._clients:
+            logger.info("使用默认 LLM 配置")
+            if settings.LLM_DEEPSEEK_API_KEY:
+                self._clients["deepseek"] = AsyncOpenAI(
+                    api_key=settings.LLM_DEEPSEEK_API_KEY,
+                    base_url="https://api.deepseek.com/v1",
+                    timeout=120.0,
+                )
+                logger.info("LLM 提供商已初始化: deepseek (默认配置)")
+            if settings.LLM_OPENAI_API_KEY:
+                self._clients["openai"] = AsyncOpenAI(
+                    api_key=settings.LLM_OPENAI_API_KEY,
+                    base_url="https://api.openai.com/v1",
+                    timeout=120.0,
+                )
+                logger.info("LLM 提供商已初始化: openai (默认配置)")
+            if settings.OLLAMA_ENDPOINT:
+                self._clients["ollama"] = AsyncOpenAI(
+                    api_key="ollama",
+                    base_url=settings.OLLAMA_ENDPOINT + "/v1",
+                    timeout=300.0,
+                )
+                logger.info("LLM 本地模型已初始化: ollama (默认配置)")
+
+        self._config_loaded = True
+
+    def reload_config(self) -> None:
+        """重新加载配置（配置更新后调用）"""
+        self._clients.clear()
+        self._init_clients()
 
     def _get_model(self, provider: str, task: str) -> str:
         """获取指定提供商+任务对应的模型名"""

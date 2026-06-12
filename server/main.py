@@ -270,6 +270,15 @@ async def update_llm_settings(request: Request):
     _save_llm_config(current_config)
     logger.info("LLM 配置已更新并保存")
 
+    # 重新加载 LLM 网关配置
+    try:
+        from server.core.llm import get_llm_gateway
+        llm_gateway = get_llm_gateway()
+        llm_gateway.reload_config()
+        logger.info("LLM 网关配置已重新加载")
+    except Exception as e:
+        logger.warning("重新加载 LLM 网关配置失败: %s", e)
+
     return {"success": True}
 
 
