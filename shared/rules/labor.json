@@ -1,0 +1,51 @@
+[
+  {
+    "category": "劳动",
+    "rule_text": "竞业限制补偿金低于月工资30%的条款应标记为高风险",
+    "trigger_keywords": ["竞业限制", "竞业禁止", "补偿金"],
+    "confidence": 0.91,
+    "source": "manual"
+  },
+  {
+    "category": "劳动",
+    "rule_text": "加班条款未明确加班费计算标准的应标记为中风险",
+    "trigger_keywords": ["加班", "加班费", "加班工资"],
+    "confidence": 0.87,
+    "source": "user_feedback"
+  },
+  {
+    "category": "劳动",
+    "rule_text": "劳动合同试用期超过法定上限的应标记为高风险",
+    "trigger_keywords": ["试用期", "试用"],
+    "confidence": 0.93,
+    "source": "manual"
+  },
+  {
+    "category": "劳动",
+    "rule_text": "劳动合同未明确工资构成和发放时间的应标记为中风险",
+    "trigger_keywords": ["工资", "薪酬", "薪资", "发放"],
+    "confidence": 0.85,
+    "source": "manual"
+  },
+  {
+    "category": "劳动",
+    "rule_text": "劳动合同约定员工承担全部培训费用的应标记为中风险",
+    "trigger_keywords": ["培训", "培训费", "服务期"],
+    "confidence": 0.78,
+    "source": "auto_learned"
+  },
+  {
+    "category": "劳动",
+    "rule_text": "劳动合同未明确社保和公积金缴纳标准的应标记为中风险",
+    "trigger_keywords": ["社保", "公积金", "五险一金"],
+    "confidence": 0.82,
+    "source": "manual"
+  },
+  {
+    "category": "劳动",
+    "rule_text": "劳动合同约定公司可单方调岗降薪的应标记为高风险",
+    "trigger_keywords": ["调岗", "降薪", "岗位调整", "单方变更"],
+    "confidence": 0.88,
+    "source": "manual"
+  }
+]

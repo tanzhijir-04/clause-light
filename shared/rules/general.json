@@ -1,0 +1,86 @@
+[
+  {
+    "category": "通用",
+    "rule_text": "滞纳金或违约金超过合同金额20%的条款应标记为高风险",
+    "trigger_keywords": ["违约金", "滞纳金", "赔偿", "罚金"],
+    "confidence": 0.95,
+    "source": "manual"
+  },
+  {
+    "category": "通用",
+    "rule_text": "单方面解除权不对等的条款应标记为高风险",
+    "trigger_keywords": ["单方解除", "解除合同", "终止"],
+    "confidence": 0.92,
+    "source": "manual"
+  },
+  {
+    "category": "通用",
+    "rule_text": "管辖法院约定为对方所在地法院的条款应标记为中风险",
+    "trigger_keywords": ["管辖", "法院", "诉讼", "仲裁"],
+    "confidence": 0.78,
+    "source": "manual"
+  },
+  {
+    "category": "通用",
+    "rule_text": "不可抗力条款免除对方所有责任的应标记为中风险",
+    "trigger_keywords": ["不可抗力", "免责", "免除责任"],
+    "confidence": 0.80,
+    "source": "manual"
+  },
+  {
+    "category": "通用",
+    "rule_text": "合同中未约定争议解决方式的应标记为中风险",
+    "trigger_keywords": ["争议", "纠纷", "解决"],
+    "confidence": 0.75,
+    "source": "auto_learned"
+  },
+  {
+    "category": "通用",
+    "rule_text": "合同期限超过5年且无中期评估条款的应标记为中风险",
+    "trigger_keywords": ["期限", "有效期", "合同期"],
+    "confidence": 0.70,
+    "source": "auto_learned"
+  },
+  {
+    "category": "通用",
+    "rule_text": "保密条款期限超过3年的应标记为中风险",
+    "trigger_keywords": ["保密", "机密", "商业秘密"],
+    "confidence": 0.72,
+    "source": "manual"
+  },
+  {
+    "category": "通用",
+    "rule_text": "合同中约定对方可随时修改条款的应标记为高风险",
+    "trigger_keywords": ["修改", "变更", "调整", "单方变更"],
+    "confidence": 0.90,
+    "source": "manual"
+  },
+  {
+    "category": "通用",
+    "rule_text": "违约责任仅约束一方的不对等条款应标记为高风险",
+    "trigger_keywords": ["违约责任", "违约金", "赔偿责任"],
+    "confidence": 0.91,
+    "source": "manual"
+  },
+  {
+    "category": "通用",
+    "rule_text": "合同中未明确付款时间和方式的应标记为中风险",
+    "trigger_keywords": ["付款", "支付", "结算", "账期"],
+    "confidence": 0.82,
+    "source": "manual"
+  },
+  {
+    "category": "通用",
+    "rule_text": "合同约定自动续约且未设退出机制的应标记为中风险",
+    "trigger_keywords": ["自动续约", "续期", "延期"],
+    "confidence": 0.76,
+    "source": "auto_learned"
+  },
+  {
+    "category": "通用",
+    "rule_text": "合同中约定放弃诉讼权利的条款应标记为高风险",
+    "trigger_keywords": ["放弃诉讼", "放弃权利", "弃权"],
+    "confidence": 0.93,
+    "source": "manual"
+  }
+]

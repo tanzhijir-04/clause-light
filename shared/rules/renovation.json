@@ -1,0 +1,37 @@
+[
+  {
+    "category": "装修",
+    "rule_text": "装修合同未约定验收标准的应标记为中风险",
+    "trigger_keywords": ["验收", "验收标准", "质量标准"],
+    "confidence": 0.85,
+    "source": "user_feedback"
+  },
+  {
+    "category": "装修",
+    "rule_text": "装修合同未约定保修期限和范围的应标记为中风险",
+    "trigger_keywords": ["保修", "质保", "保质期"],
+    "confidence": 0.80,
+    "source": "manual"
+  },
+  {
+    "category": "装修",
+    "rule_text": "装修合同未明确材料品牌和规格的应标记为中风险",
+    "trigger_keywords": ["材料", "品牌", "规格", "型号"],
+    "confidence": 0.78,
+    "source": "auto_learned"
+  },
+  {
+    "category": "装修",
+    "rule_text": "装修合同约定工期不超过30天但未约定延期赔偿的应标记为中风险",
+    "trigger_keywords": ["工期", "工期延误", "延期"],
+    "confidence": 0.75,
+    "source": "auto_learned"
+  },
+  {
+    "category": "装修",
+    "rule_text": "装修合同未约定付款节点和比例的应标记为中风险",
+    "trigger_keywords": ["付款", "付款节点", "工程款"],
+    "confidence": 0.82,
+    "source": "manual"
+  }
+]

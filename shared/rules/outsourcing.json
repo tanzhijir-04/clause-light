@@ -1,0 +1,37 @@
+[
+  {
+    "category": "外包",
+    "rule_text": "知识产权归属不明确的外包合同应标记为高风险",
+    "trigger_keywords": ["知识产权", "著作权", "专利", "版权"],
+    "confidence": 0.90,
+    "source": "manual"
+  },
+  {
+    "category": "外包",
+    "rule_text": "外包合同未约定交付标准和验收流程的应标记为中风险",
+    "trigger_keywords": ["交付", "验收", "交付物", "成果"],
+    "confidence": 0.82,
+    "source": "manual"
+  },
+  {
+    "category": "外包",
+    "rule_text": "外包合同未约定数据安全和保密义务的应标记为高风险",
+    "trigger_keywords": ["数据安全", "保密", "数据泄露", "信息安全"],
+    "confidence": 0.88,
+    "source": "manual"
+  },
+  {
+    "category": "外包",
+    "rule_text": "外包合同约定全额预付且无里程碑付款的应标记为中风险",
+    "trigger_keywords": ["预付", "全额付款", "里程碑", "付款方式"],
+    "confidence": 0.78,
+    "source": "auto_learned"
+  },
+  {
+    "category": "外包",
+    "rule_text": "外包合同未约定人员更换机制的应标记为中风险",
+    "trigger_keywords": ["人员更换", "团队更换", "人员变动"],
+    "confidence": 0.72,
+    "source": "auto_learned"
+  }
+]
