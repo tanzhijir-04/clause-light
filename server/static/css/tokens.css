@@ -1,0 +1,187 @@
+/* ============================================
+   ClauseLight 设计令牌 — V1 Notion 风格
+   ============================================ */
+
+/* ---- 亮色主题（默认） ---- */
+:root,
+[data-variant="v1"][data-theme="light"] {
+  /* 背景 */
+  --bg-app: #ffffff;
+  --bg-sidebar: #f7f7f5;
+  --bg-content: #ffffff;
+  --bg-surface: #ffffff;
+  --bg-surface-hover: #f7f7f5;
+  --bg-surface-active: #efefed;
+  --bg-elevated: #ffffff;
+  --bg-muted: #f1f1ef;
+  --bg-input: #ffffff;
+  --bg-overlay: rgba(0, 0, 0, 0.4);
+
+  /* 文字 */
+  --text-primary: #1a1a1a;
+  --text-secondary: #6b6b6b;
+  --text-tertiary: #9b9b9b;
+  --text-link: #2383e2;
+  --text-inverse: #ffffff;
+
+  /* 边框 */
+  --border-default: #e8e8e5;
+  --border-strong: #d4d4d0;
+  --border-subtle: #f0f0ee;
+
+  /* 强调色 */
+  --accent: #2383e2;
+  --accent-hover: #1b6ec2;
+  --accent-subtle: #e8f0fe;
+  --accent-text: #ffffff;
+
+  /* 风险色 */
+  --risk-red: #e53e3e;
+  --risk-red-bg: #fff5f5;
+  --risk-red-text: #c53030;
+  --risk-red-border: #fed7d7;
+  --risk-yellow: #d69e2e;
+  --risk-yellow-bg: #fffff0;
+  --risk-yellow-text: #b7791f;
+  --risk-yellow-border: #fefcbf;
+  --risk-green: #38a169;
+  --risk-green-bg: #f0fff4;
+  --risk-green-text: #276749;
+  --risk-green-border: #c6f6d5;
+
+  /* 阴影 */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.06);
+
+  /* 侧边栏 */
+  --sidebar-width: 240px;
+  --sidebar-bg: #f7f7f5;
+  --sidebar-border: #e8e8e5;
+  --sidebar-text: #6b6b6b;
+  --sidebar-text-active: #1a1a1a;
+  --sidebar-icon: #9b9b9b;
+  --sidebar-icon-active: #2383e2;
+  --sidebar-hover: rgba(0, 0, 0, 0.04);
+  --sidebar-active-bg: rgba(35, 131, 226, 0.08);
+
+  /* 功能色 */
+  --success: #38a169;
+  --success-bg: #f0fff4;
+  --warning: #d69e2e;
+  --warning-bg: #fffff0;
+  --danger: #e53e3e;
+  --danger-bg: #fff5f5;
+  --info: #2383e2;
+  --info-bg: #e8f0fe;
+}
+
+/* ---- 暗色主题 ---- */
+[data-variant="v1"][data-theme="dark"] {
+  /* 背景 */
+  --bg-app: #191919;
+  --bg-sidebar: #202020;
+  --bg-content: #191919;
+  --bg-surface: #232323;
+  --bg-surface-hover: #2a2a2a;
+  --bg-surface-active: #333333;
+  --bg-elevated: #282828;
+  --bg-muted: #2a2a2a;
+  --bg-input: #282828;
+  --bg-overlay: rgba(0, 0, 0, 0.6);
+
+  /* 文字 */
+  --text-primary: #ebebeb;
+  --text-secondary: #999999;
+  --text-tertiary: #666666;
+  --text-link: #529cca;
+  --text-inverse: #1a1a1a;
+
+  /* 边框 */
+  --border-default: #333333;
+  --border-strong: #444444;
+  --border-subtle: #2a2a2a;
+
+  /* 强调色 */
+  --accent: #529cca;
+  --accent-hover: #6db3e0;
+  --accent-subtle: #1a2a35;
+  --accent-text: #ffffff;
+
+  /* 风险色 */
+  --risk-red: #fc8181;
+  --risk-red-bg: #2d1b1b;
+  --risk-red-text: #feb2b2;
+  --risk-red-border: #5c3030;
+  --risk-yellow: #f6e05e;
+  --risk-yellow-bg: #2d2b1b;
+  --risk-yellow-text: #faf089;
+  --risk-yellow-border: #5c5530;
+  --risk-green: #68d391;
+  --risk-green-bg: #1b2d1f;
+  --risk-green-text: #9ae6b4;
+  --risk-green-border: #305c3a;
+
+  /* 阴影 */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.4);
+
+  /* 侧边栏 */
+  --sidebar-bg: #202020;
+  --sidebar-border: #333333;
+  --sidebar-text: #999999;
+  --sidebar-text-active: #ebebeb;
+  --sidebar-icon: #666666;
+  --sidebar-icon-active: #529cca;
+  --sidebar-hover: rgba(255, 255, 255, 0.06);
+  --sidebar-active-bg: rgba(82, 156, 202, 0.12);
+
+  /* 功能色 */
+  --success: #68d391;
+  --success-bg: #1b2d1f;
+  --warning: #f6e05e;
+  --warning-bg: #2d2b1b;
+  --danger: #fc8181;
+  --danger-bg: #2d1b1b;
+  --info: #529cca;
+  --info-bg: #1a2a35;
+}
+
+/* ---- 间距 ---- */
+:root {
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+}
+
+/* ---- 圆角 ---- */
+:root {
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-full: 9999px;
+}
+
+/* ---- 字体 ---- */
+:root {
+  --font-sans: 'Inter', -apple-system, 'SF Pro Text', 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif;
+  --font-mono: 'SF Mono', 'Cascadia Code', 'Cascadia Mono', Consolas, monospace;
+  --text-xs: 11px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 15px;
+  --text-lg: 18px;
+  --text-xl: 24px;
+  --text-2xl: 30px;
+  --line-height: 1.6;
+}
