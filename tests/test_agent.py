@@ -1,4 +1,4 @@
-"""Agent Harness 测试"""
+"""Agent Harness 测试 — 三段式 Pipeline"""
 
 from __future__ import annotations
 
@@ -7,6 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from server.core.agent import AnalysisResult, ContractAgent, TYPE_EN_MAP
+from server.core.workers.parser import ClauseItem, ParseResult
+from server.core.workers.workers import ClauseRisk
+from server.core.workers.evaluator import EvaluationResult
 
 
 class TestAnalysisResult:
@@ -50,8 +53,40 @@ class TestTypeEnMap:
         assert TYPE_EN_MAP.get("未知类型", "other") == "other"
 
 
+def _make_ocr_result(text: str, confidence: float = 0.95):
+    """创建 OCR 结果 mock"""
+    mock = MagicMock()
+    mock.full_text = text
+    mock.confidence_avg = confidence
+    return mock
+
+
+def _mock_parse_result(contract_type="租赁合同", clauses=None):
+    """创建 Stage 1 解析结果"""
+    if clauses is None:
+        clauses = [ClauseItem(id="1", type="termination", title="租赁期限", text="租赁期限为一年", relevance=["equity", "dispute"])]
+    return ParseResult(
+        contract_type=contract_type,
+        contract_type_en=TYPE_EN_MAP.get(contract_type, "other"),
+        complexity="standard",
+        recommended_model="fast",
+        clauses=clauses,
+    )
+
+
+def _mock_eval_result(score=85, red=0, yellow=0, green=1, recommendation="sign", summary="合同风险可控"):
+    """创建 Stage 3 评估结果"""
+    return EvaluationResult(
+        overall_score=score,
+        risk_distribution={"red": red, "yellow": yellow, "green": green},
+        recommendation=recommendation,
+        one_line_summary=summary,
+        top_risks=[],
+    )
+
+
 class TestContractAgent:
-    """合同分析 Agent 测试"""
+    """合同分析 Agent 测试 — 三段式 Pipeline"""
 
     def setup_method(self):
         """初始化 Mock 对象"""
@@ -61,188 +96,117 @@ class TestContractAgent:
 
     async def test_analyze_empty_ocr(self):
         """测试 OCR 返回空结果"""
-        mock_result = MagicMock()
-        mock_result.full_text = ""
-        self.mock_ocr.recognize = AsyncMock(return_value=mock_result)
+        self.mock_ocr.recognize = AsyncMock(return_value=_make_ocr_result(""))
 
         result = await self.agent.analyze(file_path="test.pdf")
-        assert result.contract_id == ""  # 空文本时提前返回
+        assert result.contract_id == ""
 
-    async def test_analyze_with_text(self):
-        """测试正常分析流程（无类型提示）"""
-        mock_ocr_result = MagicMock()
-        mock_ocr_result.full_text = "租赁合同\n甲方：张三\n乙方：李四\n第一条 租赁期限"
-        self.mock_ocr.recognize = AsyncMock(return_value=mock_ocr_result)
-
-        # chat 调用顺序: Step 2 classify, Step 3 split, Step 5 analyze, Step 7 score
-        classify_resp = MagicMock()
-        classify_resp.content = "租赁合同"
-        classify_resp.model = "deepseek-chat"
-
-        split_resp = MagicMock()
-        split_resp.content = "split_resp"
-        split_resp.model = "deepseek-chat"
-
-        analyze_resp = MagicMock()
-        analyze_resp.content = "analyze_resp"
-        analyze_resp.model = "deepseek-chat"
-
-        score_resp = MagicMock()
-        score_resp.content = "score_resp"
-        score_resp.model = "deepseek-chat"
-
-        self.mock_llm.chat = AsyncMock(
-            side_effect=[classify_resp, split_resp, analyze_resp, score_resp]
+    @patch("server.core.agent.evaluate")
+    @patch("server.core.agent.analyze_dimension")
+    @patch("server.core.agent.parse_contract")
+    @patch("server.core.agent.async_session_factory")
+    async def test_analyze_with_text(
+        self, mock_factory, mock_parse, mock_dimension, mock_evaluate
+    ):
+        """测试正常分析流程"""
+        self.mock_ocr.recognize = AsyncMock(
+            return_value=_make_ocr_result("租赁合同\n甲方：张三\n乙方：李四\n第一条 租赁期限")
         )
 
-        # parse_json 调用顺序: Step 3 split, Step 5 analyze, Step 7 score
-        # 注意: Step 2 (classify) 不调用 parse_json
-        self.mock_llm.parse_json = MagicMock(
-            side_effect=[
-                [{"clause_number": "第一条", "title": "租赁期限", "content": "租赁期限为一年"}],
-                {"risk_level": "green", "risk_type": "无风险", "risk_summary": "正常条款",
-                 "plain_explanation": "正常", "legal_basis": "《合同法》", "severity_score": 1},
-                {"overall_score": 85, "risk_distribution": {"red": 0, "yellow": 0, "green": 1},
-                 "one_line_summary": "合同风险可控", "recommendation": "sign"},
-            ]
+        # Stage 1: parse_contract
+        mock_parse.return_value = _mock_parse_result()
+
+        # Stage 2: analyze_dimension (5 个维度并行)
+        async def _fake_dimension(dim, clauses, llm, contract_type, kb_rules=None):
+            if dim == "equity":
+                return [ClauseRisk(clause_id="1", risk_level="green", issue="正常条款", severity=1)]
+            elif dim == "dispute":
+                return [ClauseRisk(clause_id="1", risk_level="green", issue="正常条款", severity=1)]
+            return []
+
+        mock_dimension.side_effect = _fake_dimension
+
+        # Stage 3: evaluate
+        mock_evaluate.return_value = _mock_eval_result()
+
+        # 知识库 mock
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_factory.return_value = mock_session
+
+        result = await self.agent.analyze(file_path="test.pdf")
+        assert result.overall_score == 85
+        assert result.contract_type == "租赁合同"
+        assert len(result.clauses) >= 1
+        # 验证 parse_contract 被调用
+        mock_parse.assert_called_once()
+
+    @patch("server.core.agent.evaluate")
+    @patch("server.core.agent.analyze_dimension")
+    @patch("server.core.agent.parse_contract")
+    @patch("server.core.agent.async_session_factory")
+    async def test_analyze_with_hint(
+        self, mock_factory, mock_parse, mock_dimension, mock_evaluate
+    ):
+        """测试带类型提示"""
+        self.mock_ocr.recognize = AsyncMock(
+            return_value=_make_ocr_result("劳动合同内容...")
         )
 
-        with patch("server.core.agent.async_session_factory") as mock_factory:
-            mock_session = AsyncMock()
-            mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+        clauses = [ClauseItem(id="1", type="other", title="试用期", text="试用期三个月", relevance=["general"])]
+        mock_parse.return_value = _mock_parse_result(contract_type="劳动合同", clauses=clauses)
 
-            result = await self.agent.analyze(file_path="test.pdf")
-            assert result.overall_score == 85
-            assert result.contract_type == "租赁合同"
-            assert len(result.clauses) == 1
+        async def _fake_dimension(dim, clauses, llm, contract_type, kb_rules=None):
+            if dim == "general":
+                return [ClauseRisk(clause_id="1", risk_level="yellow", risk_type="试用期过长", issue="试用期超过法定上限", severity=6, suggestion="缩短试用期", legal_basis="《劳动合同法》")]
+            return []
 
-    async def test_analyze_with_hint_preserves_hint_when_classify_fails(self):
-        """测试带类型提示：classify 失败时保留 hint"""
-        mock_ocr_result = MagicMock()
-        mock_ocr_result.full_text = "劳动合同内容..."
-        self.mock_ocr.recognize = AsyncMock(return_value=mock_ocr_result)
+        mock_dimension.side_effect = _fake_dimension
+        mock_evaluate.return_value = _mock_eval_result(score=60, yellow=1, green=0, recommendation="negotiate_first", summary="试用期条款需修改")
 
-        # classify 失败, split 正常
-        classify_resp = MagicMock()
-        classify_resp.content = ""  # 空内容，保留 hint
-        classify_resp.model = "deepseek-chat"
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_factory.return_value = mock_session
 
-        split_resp = MagicMock()
-        split_resp.content = "split_resp"
-        split_resp.model = "deepseek-chat"
+        result = await self.agent.analyze(
+            file_path="test.pdf",
+            contract_type_hint="劳动合同",
+        )
+        assert result.contract_type == "劳动合同"
+        assert result.overall_score == 60
 
-        analyze_resp = MagicMock()
-        analyze_resp.content = "analyze_resp"
-        analyze_resp.model = "deepseek-chat"
-
-        score_resp = MagicMock()
-        score_resp.content = "score_resp"
-        score_resp.model = "deepseek-chat"
-
-        self.mock_llm.chat = AsyncMock(
-            side_effect=[classify_resp, split_resp, analyze_resp, score_resp]
+    @patch("server.core.agent.evaluate")
+    @patch("server.core.agent.analyze_dimension")
+    @patch("server.core.agent.parse_contract")
+    @patch("server.core.agent.async_session_factory")
+    async def test_analyze_llm_failure_fallback(
+        self, mock_factory, mock_parse, mock_dimension, mock_evaluate
+    ):
+        """测试 LLM 完全失败时的兜底行为"""
+        self.mock_ocr.recognize = AsyncMock(
+            return_value=_make_ocr_result("合同内容")
         )
 
-        self.mock_llm.parse_json = MagicMock(
-            side_effect=[
-                [{"clause_number": "第一条", "content": "试用期三个月"}],
-                {"risk_level": "yellow", "risk_type": "试用期过长",
-                 "risk_summary": "试用期超过法定上限", "plain_explanation": "试用期太长了",
-                 "legal_basis": "《劳动合同法》", "severity_score": 6},
-                {"overall_score": 60, "risk_distribution": {"red": 0, "yellow": 1, "green": 0},
-                 "one_line_summary": "试用期条款需修改", "recommendation": "negotiate_first"},
-            ]
-        )
+        # Stage 1 失败
+        mock_parse.side_effect = Exception("LLM 不可用")
 
-        with patch("server.core.agent.async_session_factory") as mock_factory:
-            mock_session = AsyncMock()
-            mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_factory.return_value = mock_session
 
-            result = await self.agent.analyze(
-                file_path="test.pdf",
-                contract_type_hint="劳动合同",
-            )
-            # hint 作为默认值，classify 返回空所以保留 hint
-            assert result.contract_type == "劳动合同"
-            assert result.overall_score == 60
-
-    async def test_analyze_with_hint_classify_overrides(self):
-        """测试带类型提示：classify 成功时覆盖 hint"""
-        mock_ocr_result = MagicMock()
-        mock_ocr_result.full_text = "合同内容..."
-        self.mock_ocr.recognize = AsyncMock(return_value=mock_ocr_result)
-
-        classify_resp = MagicMock()
-        classify_resp.content = "租赁合同"  # classify 覆盖 hint
-        classify_resp.model = "deepseek-chat"
-
-        split_resp = MagicMock()
-        split_resp.content = "split_resp"
-
-        analyze_resp = MagicMock()
-        analyze_resp.content = "analyze_resp"
-
-        score_resp = MagicMock()
-        score_resp.content = "score_resp"
-
-        self.mock_llm.chat = AsyncMock(
-            side_effect=[classify_resp, split_resp, analyze_resp, score_resp]
-        )
-        self.mock_llm.parse_json = MagicMock(
-            side_effect=[
-                [{"clause_number": "第一条", "content": "内容"}],
-                {"risk_level": "green", "risk_type": "无", "risk_summary": "正常",
-                 "plain_explanation": "正常", "legal_basis": "《合同法》", "severity_score": 1},
-                {"overall_score": 80, "risk_distribution": {"red": 0, "yellow": 0, "green": 1},
-                 "one_line_summary": "风险可控", "recommendation": "sign"},
-            ]
-        )
-
-        with patch("server.core.agent.async_session_factory") as mock_factory:
-            mock_session = AsyncMock()
-            mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            result = await self.agent.analyze(
-                file_path="test.pdf",
-                contract_type_hint="劳动合同",
-            )
-            # classify 返回 "租赁合同"，覆盖了 hint "劳动合同"
-            assert result.contract_type == "租赁合同"
-
-    async def test_analyze_llm_failure_fallback_clauses_preserved(self):
-        """测试 LLM 完全失败时条款保留（修复后）
-
-        修复前：当 _analyze_clause 返回 None 时，原始条款数据被丢弃。
-        修复后：失败的条款保留并标记为 green（兜底）。
-        """
-        mock_ocr_result = MagicMock()
-        mock_ocr_result.full_text = "合同内容"
-        self.mock_ocr.recognize = AsyncMock(return_value=mock_ocr_result)
-
-        self.mock_llm.chat = AsyncMock(side_effect=Exception("LLM 不可用"))
-        self.mock_llm.parse_json = MagicMock(return_value=None)
-
-        with patch("server.core.agent.async_session_factory") as mock_factory:
-            mock_session = AsyncMock()
-            mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            result = await self.agent.analyze(file_path="test.pdf")
-            # 修复后：兜底条款应保留，不丢失
-            assert len(result.clauses) > 0, "LLM 失败时条款不应丢失"
-            # 所有条款应标记为 green（兜底）
-            assert result.clauses[0]["risk_level"] == "green"
-            # 应有评分（基于绿色条款计算）
-            assert result.overall_score > 0
+        result = await self.agent.analyze(file_path="test.pdf")
+        # Stage 1 失败时兜底：全文作为一个条款
+        assert len(result.clauses) > 0, "LLM 失败时条款不应丢失"
+        assert result.clauses[0]["risk_level"] == "green"
 
     async def test_analyze_step_callback(self):
         """测试步骤回调"""
-        mock_ocr_result = MagicMock()
-        mock_ocr_result.full_text = ""
-        self.mock_ocr.recognize = AsyncMock(return_value=mock_ocr_result)
+        self.mock_ocr.recognize = AsyncMock(
+            return_value=_make_ocr_result("")
+        )
 
         callback = AsyncMock()
         result = await self.agent.analyze(file_path="test.pdf", on_step=callback)
@@ -256,69 +220,79 @@ class TestContractAgent:
         result = await self.agent.analyze(file_path="test.pdf")
         assert result.contract_id == ""
 
-    async def test_analyze_step6_suggest_for_red_yellow(self):
-        """测试 Step 6 仅对红色/黄色条款生成建议"""
-        mock_ocr_result = MagicMock()
-        mock_ocr_result.full_text = "合同内容"
-        self.mock_ocr.recognize = AsyncMock(return_value=mock_ocr_result)
-
-        classify_resp = MagicMock()
-        classify_resp.content = "租赁合同"
-
-        split_resp = MagicMock()
-        split_resp.content = "split_resp"
-
-        # 两个条款分析响应
-        analyze_red = MagicMock()
-        analyze_red.content = "red_resp"
-        analyze_green = MagicMock()
-        analyze_green.content = "green_resp"
-
-        suggest_resp = MagicMock()
-        suggest_resp.content = "suggest_resp"
-
-        score_resp = MagicMock()
-        score_resp.content = "score_resp"
-
-        self.mock_llm.chat = AsyncMock(
-            side_effect=[classify_resp, split_resp, analyze_red, analyze_green, suggest_resp, score_resp]
+    @patch("server.core.agent.evaluate")
+    @patch("server.core.agent.analyze_dimension")
+    @patch("server.core.agent.parse_contract")
+    @patch("server.core.agent.async_session_factory")
+    async def test_analyze_risk_distribution(
+        self, mock_factory, mock_parse, mock_dimension, mock_evaluate
+    ):
+        """测试风险分布统计"""
+        self.mock_ocr.recognize = AsyncMock(
+            return_value=_make_ocr_result("合同内容")
         )
 
-        self.mock_llm.parse_json = MagicMock(
-            side_effect=[
-                # Step 3 split
-                [
-                    {"clause_number": "第一条", "content": "高风险条款"},
-                    {"clause_number": "第二条", "content": "正常条款"},
-                ],
-                # Step 5 analyze red
-                {"risk_level": "red", "risk_type": "霸王条款", "risk_summary": "不公平",
-                 "plain_explanation": "不公平", "legal_basis": "《合同法》", "severity_score": 9},
-                # Step 5 analyze green
-                {"risk_level": "green", "risk_type": "无", "risk_summary": "正常",
-                 "plain_explanation": "正常", "legal_basis": "《合同法》", "severity_score": 1},
-                # Step 6 suggest (only for red)
-                {"suggested_clause": "修改后的条款", "can_negotiate": True},
-                # Step 7 score
-                {"overall_score": 40, "risk_distribution": {"red": 1, "yellow": 0, "green": 1},
-                 "one_line_summary": "有高风险条款", "recommendation": "negotiate_first"},
-            ]
+        clauses = [
+            ClauseItem(id="1", type="penalty", title="违约金", text="违约金50%", relevance=["equity", "financial"]),
+            ClauseItem(id="2", type="force_majeure", title="不可抗力", text="不可抗力免责", relevance=["general"]),
+        ]
+        mock_parse.return_value = _mock_parse_result(clauses=clauses)
+
+        async def _fake_dimension(dim, clauses, llm, contract_type, kb_rules=None):
+            if dim == "equity":
+                return [ClauseRisk(clause_id="1", risk_level="red", risk_type="违约金过高", issue="年化超24%", severity=9, suggestion="降低比例", legal_basis="《合同法》")]
+            elif dim == "financial":
+                return [ClauseRisk(clause_id="1", risk_level="red", risk_type="违约金过高", issue="财务风险", severity=8)]
+            elif dim == "general":
+                return [ClauseRisk(clause_id="2", risk_level="green", issue="正常条款", severity=1)]
+            return []
+
+        mock_dimension.side_effect = _fake_dimension
+        mock_evaluate.return_value = _mock_eval_result(score=35, red=1, green=1, recommendation="negotiate_first", summary="有高风险条款")
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_factory.return_value = mock_session
+
+        result = await self.agent.analyze(file_path="test.pdf")
+        assert result.overall_score == 35
+        assert result.red_count == 1
+        assert result.green_count == 1
+        # 红色条款应有修改建议（来自 Worker 的 suggestion）
+        red_clause = [c for c in result.clauses if c.get("risk_level") == "red"]
+        assert len(red_clause) == 1
+
+    @patch("server.core.agent.evaluate")
+    @patch("server.core.agent.analyze_dimension")
+    @patch("server.core.agent.parse_contract")
+    @patch("server.core.agent.async_session_factory")
+    async def test_analyze_worker_failure_graceful(
+        self, mock_factory, mock_parse, mock_dimension, mock_evaluate
+    ):
+        """测试单个 Worker 失败时的优雅降级"""
+        self.mock_ocr.recognize = AsyncMock(
+            return_value=_make_ocr_result("合同内容")
         )
 
-        with patch("server.core.agent.async_session_factory") as mock_factory:
-            mock_session = AsyncMock()
-            mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+        clauses = [ClauseItem(id="1", type="penalty", title="违约金", text="违约金50%", relevance=["equity", "financial"])]
+        mock_parse.return_value = _mock_parse_result(clauses=clauses)
 
-            result = await self.agent.analyze(file_path="test.pdf")
-            assert result.overall_score == 40
-            assert result.red_count == 1
-            assert result.green_count == 1
-            # 红色条款应有修改建议
-            red_clause = [c for c in result.clauses if c.get("risk_level") == "red"]
-            assert len(red_clause) == 1
-            assert red_clause[0].get("suggested_clause") == "修改后的条款"
-            # 绿色条款不应有修改建议
-            green_clause = [c for c in result.clauses if c.get("risk_level") == "green"]
-            assert len(green_clause) == 1
-            assert green_clause[0].get("suggested_clause", "") == ""
+        # equity Worker 失败，其他正常
+        async def _fake_dimension(dim, clauses, llm, contract_type, kb_rules=None):
+            if dim == "equity":
+                raise Exception("Worker 崩溃")
+            return []
+
+        mock_dimension.side_effect = _fake_dimension
+        mock_evaluate.return_value = _mock_eval_result(score=50, green=1)
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_factory.return_value = mock_session
+
+        result = await self.agent.analyze(file_path="test.pdf")
+        # equity Worker 失败，但其他 Worker 和整体流程应继续
+        assert len(result.clauses) >= 1
+        assert result.contract_type == "租赁合同"

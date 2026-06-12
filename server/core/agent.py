@@ -1,39 +1,31 @@
-"""Agent Harness — 7 步合同分析流程"""
+"""Agent Pipeline — 三段式 Prompt Chaining + Parallelization"""
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Callable
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from server.config import TYPE_EN_MAP
 from server.core.knowledge import KnowledgeEngine
 from server.core.llm import LLMGateway, get_llm_gateway
 from server.core.ocr import OCREngine, get_ocr_engine
-from server.core.prompts.analyze import analyze_prompt
-from server.core.prompts.classify import classify_prompt
-from server.core.prompts.score import score_prompt
-from server.core.prompts.split import split_prompt
-from server.core.prompts.suggest import suggest_prompt
-from server.models.database import (
-    Analysis,
-    ClauseAnalysis,
-    Contract,
-    async_session_factory,
-)
+from server.core.workers.evaluator import EvaluationResult, evaluate
+from server.core.workers.workers import ClauseRisk, analyze_dimension
+from server.core.workers.parser import ClauseItem, ParseResult, parse_contract
+
+# 向后兼容：旧代码可能从 agent 模块导入 TYPE_EN_MAP
+from server.core.workers.parser import TYPE_EN_MAP  # noqa: F401
+
+from server.models.database import async_session_factory
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class AnalysisResult:
-    """分析结果"""
+    """分析结果（保持与原有接口兼容）"""
 
     contract_id: str = ""
     contract_type: str = ""
@@ -46,10 +38,16 @@ class AnalysisResult:
     red_count: int = 0
     yellow_count: int = 0
     green_count: int = 0
+    needs_review: list[str] = field(default_factory=list)
+    top_risks: list[str] = field(default_factory=list)
+
+
+# Worker 维度列表
+DIMENSIONS = ["equity", "financial", "ip", "dispute", "general"]
 
 
 class ContractAgent:
-    """合同分析 Agent — 7 步流程"""
+    """合同分析 Agent — 三段式 Pipeline"""
 
     def __init__(
         self,
@@ -65,17 +63,7 @@ class ContractAgent:
         contract_type_hint: str | None = None,
         on_step: Callable | None = None,
     ) -> AnalysisResult:
-        """
-        完整的 7 步分析流程。
-
-        Step 1: OCR 识别
-        Step 2: 合同分类（LLM）
-        Step 3: 条款拆解（LLM）
-        Step 4: 知识库检索
-        Step 5: 逐条风险分析（LLM，并行）
-        Step 6: 修改建议生成（LLM）
-        Step 7: 综合评分（LLM）
-        """
+        """完整的三段式分析流程"""
 
         async def _notify(step: int, total: int, message: str) -> None:
             if on_step:
@@ -87,204 +75,134 @@ class ContractAgent:
         result = AnalysisResult()
         contract_id = uuid.uuid4().hex
 
-        # ── Step 1: OCR 识别 ──
-        await _notify(1, 7, "正在识别文字...")
-        logger.info("Step 1/7: OCR 识别")
+        # ── OCR 识别 ──
+        await _notify(1, 5, "正在识别文字...")
+        logger.info("OCR 识别开始")
         try:
-            ocr_result = await self._retry(lambda: self.ocr.recognize(file_path), "OCR 识别")
+            ocr_result = await self._retry(
+                lambda: self.ocr.recognize(file_path), "OCR 识别"
+            )
             if not ocr_result or not ocr_result.full_text.strip():
                 logger.error("OCR 识别结果为空")
                 return result
             full_text = ocr_result.full_text
+
+            # 检查 OCR 质量
+            if ocr_result.confidence_avg < 0.7:
+                logger.warning("OCR 置信度较低: %.2f", ocr_result.confidence_avg)
         except Exception as e:
-            logger.error("Step 1 失败: %s", e)
+            logger.error("OCR 识别失败: %s", e)
             return result
 
-        # ── Step 2: 合同分类 ──
-        await _notify(2, 7, "正在分类合同...")
-        logger.info("Step 2/7: 合同分类")
-        contract_type = contract_type_hint or "其他"
+        # ── Stage 1: 结构解析 ──
+        await _notify(2, 5, "正在解析合同结构...")
+        logger.info("Stage 1: 结构解析")
         try:
-            resp = await self.llm.chat(
-                classify_prompt(full_text), task="classification"
-            )
-            if resp.content:
-                # 清理 LLM 输出（去掉引号、换行等）
-                parsed_type = resp.content.strip().strip('"').strip("'").strip()
-                if parsed_type:
-                    contract_type = parsed_type
-                result.model_used = resp.model
+            parse_result = await parse_contract(full_text, self.llm, contract_type_hint)
         except Exception as e:
-            logger.warning("Step 2 使用默认类型: %s", e)
-
-        result.contract_type = contract_type
-        result.contract_type_en = TYPE_EN_MAP.get(contract_type, "other")
-
-        # ── Step 3: 条款拆解 ──
-        await _notify(3, 7, "正在拆解条款...")
-        logger.info("Step 3/7: 条款拆解")
-        clauses: list[dict] = []
-        try:
-            resp = await self.llm.chat(
-                split_prompt(full_text, contract_type), task="analysis"
+            logger.error("Stage 1 失败: %s", e)
+            # 兜底：全文作为一个条款
+            parse_result = ParseResult(
+                contract_type=contract_type_hint or "其他",
+                clauses=[ClauseItem(
+                    id="1", type="other", title="全文",
+                    text=full_text[:2000], relevance=["general"],
+                )],
             )
-            if resp.content:
-                parsed = self.llm.parse_json(resp.content)
-                if isinstance(parsed, list):
-                    clauses = parsed
-                elif isinstance(parsed, dict) and "clauses" in parsed:
-                    clauses = parsed["clauses"]
-        except Exception as e:
-            logger.warning("Step 3 失败: %s", e)
 
-        if not clauses:
-            # 兜底：将全文作为一个条款
-            clauses = [{"clause_number": "第一条", "title": "全文", "content": full_text[:2000]}]
+        result.contract_type = parse_result.contract_type
+        result.contract_type_en = parse_result.contract_type_en
+        result.model_used = parse_result.recommended_model
 
-        # ── Step 4: 知识库检索 ──
-        await _notify(4, 7, "正在检索知识库...")
-        logger.info("Step 4/7: 知识库检索")
+        # ── 知识库检索 ──
         kb_rules: list[str] = []
         try:
             async with async_session_factory() as db:
                 knowledge = KnowledgeEngine(db)
-                kb_rules = await knowledge.search(full_text[:500], contract_type)
+                kb_rules = await knowledge.search(full_text[:500], parse_result.contract_type)
         except Exception as e:
-            logger.warning("Step 4 知识库检索失败: %s", e)
+            logger.warning("知识库检索失败: %s", e)
 
-        # ── Step 5: 逐条风险分析（并行） ──
-        await _notify(5, 7, f"正在分析 {len(clauses)} 条条款...")
-        logger.info("Step 5/7: 逐条风险分析 (%d 条)", len(clauses))
+        # ── Stage 2: 并行风险评估 ──
+        total_workers = len(DIMENSIONS)
+        await _notify(3, 5, f"正在并行分析 {total_workers} 个维度...")
+        logger.info("Stage 2: 并行风险评估 (%d 个 Worker)", total_workers)
 
-        analysis_tasks = [
-            self._analyze_clause(clause, contract_type, full_text[:1000], kb_rules)
-            for clause in clauses
+        worker_tasks = [
+            analyze_dimension(dim, parse_result.clauses, self.llm, parse_result.contract_type, kb_rules)
+            for dim in DIMENSIONS
         ]
-        clause_results = await asyncio.gather(*analysis_tasks, return_exceptions=True)
+        worker_results = await asyncio.gather(*worker_tasks, return_exceptions=True)
 
-        analyzed_clauses: list[dict] = []
-        for i, res in enumerate(clause_results):
+        # 合并所有 Worker 结果
+        all_risks: list[ClauseRisk] = []
+        for dim, res in zip(DIMENSIONS, worker_results):
             if isinstance(res, Exception):
-                logger.warning("条款 %d 分析失败: %s", i, res)
-                # 兜底：未分析的条款标为绿色
-                analyzed_clauses.append({
-                    **clauses[i],
-                    "risk_level": "green",
-                    "risk_type": "未分析",
-                    "risk_summary": "分析失败",
-                    "plain_explanation": "",
-                    "severity_score": 1,
-                })
-            elif res is not None:
-                analyzed_clauses.append({**clauses[i], **res})
-            else:
-                # _analyze_clause 返回 None，保留原始条款并标记为未分析
-                analyzed_clauses.append({
-                    **clauses[i],
-                    "risk_level": "green",
-                    "risk_type": "未分析",
-                    "risk_summary": "分析结果为空",
-                    "plain_explanation": "",
-                    "severity_score": 1,
-                })
+                logger.warning("Worker[%s] 失败: %s", dim, res)
+            elif isinstance(res, list):
+                all_risks.extend(res)
 
-        result.clauses = analyzed_clauses
-
-        # ── Step 6: 修改建议 ──
-        await _notify(6, 7, "正在生成修改建议...")
-        logger.info("Step 6/7: 修改建议生成")
-        for clause in analyzed_clauses:
-            if clause.get("risk_level") in ("red", "yellow"):
-                try:
-                    resp = await self.llm.chat(
-                        suggest_prompt(
-                            clause.get("content", ""),
-                            clause.get("risk_type", ""),
-                        ),
-                        task="explanation",
-                    )
-                    if resp.content:
-                        parsed = self.llm.parse_json(resp.content)
-                        if isinstance(parsed, dict):
-                            clause["suggested_clause"] = parsed.get("suggested_clause", "")
-                            clause["can_negotiate"] = parsed.get("can_negotiate", False)
-                except Exception as e:
-                    logger.warning("Step 6 建议生成失败: %s", e)
-
-        # ── Step 7: 综合评分 ──
-        await _notify(7, 7, "正在综合评分...")
-        logger.info("Step 7/7: 综合评分")
+        # ── Stage 3: 聚合评分 ──
+        await _notify(4, 5, "正在聚合评分...")
+        logger.info("Stage 3: 聚合评分")
         try:
-            resp = await self.llm.chat(
-                score_prompt(analyzed_clauses), task="scoring"
-            )
-            if resp.content:
-                parsed = self.llm.parse_json(resp.content)
-                if isinstance(parsed, dict):
-                    result.overall_score = parsed.get("overall_score", 50)
-                    result.summary = parsed.get("one_line_summary", "")
-                    result.recommendation = parsed.get("recommendation", "negotiate_first")
-                    dist = parsed.get("risk_distribution", {})
-                    result.red_count = dist.get("red", 0)
-                    result.yellow_count = dist.get("yellow", 0)
-                    result.green_count = dist.get("green", 0)
+            eval_result = await evaluate(all_risks, self.llm)
         except Exception as e:
-            logger.warning("Step 7 评分失败: %s", e)
+            logger.warning("Stage 3 失败: %s", e)
+            # 兜底：直接统计
+            eval_result = EvaluationResult()
+            for r in all_risks:
+                if r.risk_level in eval_result.risk_distribution:
+                    eval_result.risk_distribution[r.risk_level] += 1
 
-        # 如果 LLM 没有给出分布，从条款统计
-        if not result.red_count and not result.yellow_count and not result.green_count:
-            for c in analyzed_clauses:
-                level = c.get("risk_level", "green")
-                if level == "red":
-                    result.red_count += 1
-                elif level == "yellow":
-                    result.yellow_count += 1
-                else:
-                    result.green_count += 1
+        # ── 组装最终结果 ──
+        await _notify(5, 5, "正在生成报告...")
+        result.overall_score = eval_result.overall_score
+        result.recommendation = eval_result.recommendation
+        result.summary = eval_result.one_line_summary
+        result.needs_review = eval_result.needs_review
+        result.top_risks = eval_result.top_risks
+        result.red_count = eval_result.risk_distribution.get("red", 0)
+        result.yellow_count = eval_result.risk_distribution.get("yellow", 0)
+        result.green_count = eval_result.risk_distribution.get("green", 0)
 
-        # 如果没有评分，根据红黄绿比例计算
-        if result.overall_score == 0:
-            total = result.red_count + result.yellow_count + result.green_count
-            if total > 0:
-                result.overall_score = int(
-                    (result.green_count * 90 + result.yellow_count * 60 + result.red_count * 20) / total
-                )
+        # 组装条款列表（合并解析结果和风险评估结果）
+        # 同一 clause_id + 同一维度只保留 severity 最高的
+        risk_map: dict[str, ClauseRisk] = {}
+        for r in all_risks:
+            key = r.clause_id
+            if key not in risk_map or r.severity > risk_map[key].severity:
+                risk_map[key] = r
+
+        for clause in parse_result.clauses:
+            risk = risk_map.get(clause.id)
+            clause_dict = {
+                "clause_number": clause.id,
+                "title": clause.title,
+                "content": clause.text,
+                "type": clause.type,
+                "risk_level": risk.risk_level if risk else "green",
+                "risk_type": risk.risk_type if risk else "未分析",
+                "risk_summary": risk.issue if risk else "本维度无明显风险",
+                "plain_explanation": risk.issue if risk else "",
+                "severity_score": risk.severity if risk else 1,
+                "suggested_clause": risk.suggestion if risk else "",
+                "legal_basis": risk.legal_basis if risk else "",
+                "unfavorable_to": risk.unfavorable_to if risk else "",
+                "needs_review": clause.id in eval_result.needs_review,
+            }
+            result.clauses.append(clause_dict)
 
         result.contract_id = contract_id
         logger.info(
-            "分析完成: score=%d red=%d yellow=%d green=%d",
+            "分析完成: score=%d red=%d yellow=%d green=%d review=%d",
             result.overall_score,
             result.red_count,
             result.yellow_count,
             result.green_count,
+            len(result.needs_review),
         )
         return result
-
-    async def _analyze_clause(
-        self,
-        clause: dict,
-        contract_type: str,
-        context: str,
-        kb_rules: list[str],
-    ) -> dict | None:
-        """分析单条条款的风险"""
-        try:
-            resp = await self.llm.chat(
-                analyze_prompt(
-                    clause.get("content", ""),
-                    contract_type,
-                    context,
-                    kb_rules,
-                ),
-                task="analysis",
-            )
-            if resp.content:
-                parsed = self.llm.parse_json(resp.content)
-                if isinstance(parsed, dict):
-                    return parsed
-        except Exception as e:
-            logger.warning("条款分析失败: %s", e)
-        return None
 
     async def _retry(self, fn, step_name: str, max_retries: int = 2):
         """带重试的异步调用"""
