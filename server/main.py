@@ -46,6 +46,18 @@ async def lifespan(app: FastAPI):
     # 导入基础规则（如果知识库为空）
     await _init_default_rules()
 
+    # 检查 OCR 模型状态
+    from server.core.model_manager import get_model_manager
+
+    manager = get_model_manager()
+    status = manager.get_overall_status()
+    if not status["all_installed"]:
+        missing = [m["name"] for m in status["models"] if not m["installed"]]
+        logger.warning(
+            "OCR 模型未完整安装，缺失: %s。请在管理面板的模型管理页面下载。",
+            ", ".join(missing),
+        )
+
     logger.info("合同红绿灯 启动完成 ✅")
     yield
 
@@ -129,11 +141,13 @@ async def log_requests(request: Request, call_next):
 
 from server.api.contracts import router as contracts_router
 from server.api.knowledge import router as knowledge_router
+from server.api.models import router as models_router
 from server.api.sync import router as sync_router
 from server.api.ws import router as ws_router
 
 app.include_router(contracts_router)
 app.include_router(knowledge_router)
+app.include_router(models_router)
 app.include_router(sync_router)
 app.include_router(ws_router)
 

@@ -115,6 +115,7 @@ const Components = (() => {
       ]},
       { section: '系统', items: [
         { key: 'sync', label: '同步管理', icon: 'cloud' },
+        { key: 'models', label: '模型管理', icon: 'database' },
         { key: 'settings', label: '设置', icon: 'settings' },
       ]},
     ];

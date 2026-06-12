@@ -192,6 +192,13 @@ const API = (() => {
     },
   };
 
+  /** 模型管理 API */
+  const models = {
+    async status() {
+      return _fetch('/api/models/status');
+    },
+  };
+
   /** 设置相关 API */
   const settings = {
     async llm() {
@@ -208,5 +215,5 @@ const API = (() => {
     },
   };
 
-  return { contracts, knowledge, sync, settings };
+  return { contracts, knowledge, sync, models, settings };
 })();

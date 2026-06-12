@@ -30,6 +30,8 @@ class Settings(BaseSettings):
 
     # ── OCR ──
     OCR_USE_GPU: bool = False
+    OCR_MODEL_DIR: str = "data/models/paddleocr"
+    OCR_AUTO_DOWNLOAD: bool = True
 
     # ── 同步 ──
     SYNC_ENABLED: bool = False

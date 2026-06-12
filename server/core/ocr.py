@@ -33,13 +33,55 @@ class OCREngine:
             try:
                 from paddleocr import PaddleOCR
 
+                # 构建模型路径
+                model_dir = Path(settings.OCR_MODEL_DIR)
+                det_model_dir = str(model_dir / "ch_PP-OCRv4_det_infer")
+                rec_model_dir = str(model_dir / "ch_PP-OCRv4_rec_infer")
+                cls_model_dir = str(model_dir / "ch_ppocr_mobile_v2.0_cls_infer")
+
+                # 检查模型是否已下载
+                from server.core.model_manager import get_model_manager
+
+                manager = get_model_manager()
+                overall = manager.get_overall_status()
+
+                if not overall["all_installed"]:
+                    if settings.OCR_AUTO_DOWNLOAD:
+                        logger.info("OCR 模型未就绪，自动下载中...")
+                        import asyncio
+
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            # 在已有事件循环中，用 create_task 方式
+                            import concurrent.futures
+
+                            with concurrent.futures.ThreadPoolExecutor() as pool:
+                                loop.run_in_executor(
+                                    pool,
+                                    lambda: asyncio.run(manager.download_all()),
+                                )
+                        else:
+                            loop.run_until_complete(manager.download_all())
+                    else:
+                        raise RuntimeError(
+                            "OCR 模型未下载。请在管理面板的模型管理页面手动下载，"
+                            "或设置 OCR_AUTO_DOWNLOAD=True 让系统自动下载。"
+                        )
+
                 self._ocr = PaddleOCR(
                     use_angle_cls=True,
                     lang="ch",
                     use_gpu=settings.OCR_USE_GPU,
+                    det_model_dir=det_model_dir,
+                    rec_model_dir=rec_model_dir,
+                    cls_model_dir=cls_model_dir,
                     show_log=False,
                 )
-                logger.info("PaddleOCR 初始化完成 (gpu=%s)", settings.OCR_USE_GPU)
+                logger.info(
+                    "PaddleOCR 初始化完成 (gpu=%s, model_dir=%s)",
+                    settings.OCR_USE_GPU,
+                    settings.OCR_MODEL_DIR,
+                )
             except ImportError:
                 logger.error("PaddleOCR 未安装，请运行: pip install paddleocr paddlepaddle")
                 raise

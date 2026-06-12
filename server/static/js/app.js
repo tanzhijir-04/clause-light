@@ -8,6 +8,7 @@ const App = (() => {
     knowledge: KnowledgePage,
     sync: SyncPage,
     settings: SettingsPage,
+    models: ModelsPage,
     contractDetail: ContractDetailPage,
   };
 
@@ -95,6 +96,7 @@ const App = (() => {
     Router.register('knowledge', (params) => renderPage('knowledge', params));
     Router.register('sync', (params) => renderPage('sync', params));
     Router.register('settings', (params) => renderPage('settings', params));
+    Router.register('models', (params) => renderPage('models', params));
 
     // 路由变化时更新侧边栏高亮
     Router.onChange(route => {
