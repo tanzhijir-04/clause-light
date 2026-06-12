@@ -118,8 +118,8 @@ const SyncPage = {
             <input class="input" value="/ClauseLight/" />
           </div>
           <div style="display:flex;gap:var(--sp-2);margin-top:var(--sp-4)">
-            <button class="btn btn-primary">${Icons.check(14)} 保存配置</button>
-            <button class="btn btn-secondary">${Icons.refresh(14)} 测试连接</button>
+            <button class="btn btn-primary" onclick="SyncPage.saveConfig()">${Icons.check(14)} 保存配置</button>
+            <button class="btn btn-secondary" onclick="SyncPage.testConnection()">${Icons.refresh(14)} 测试连接</button>
           </div>
         </div>`;
     }
@@ -140,8 +140,8 @@ const SyncPage = {
             <div class="form-hint">用于私有仓库的访问认证</div>
           </div>
           <div style="display:flex;gap:var(--sp-2);margin-top:var(--sp-4)">
-            <button class="btn btn-primary">${Icons.check(14)} 保存配置</button>
-            <button class="btn btn-secondary">${Icons.refresh(14)} 测试连接</button>
+            <button class="btn btn-primary" onclick="SyncPage.saveConfig()">${Icons.check(14)} 保存配置</button>
+            <button class="btn btn-secondary" onclick="SyncPage.testConnection()">${Icons.refresh(14)} 测试连接</button>
           </div>
         </div>`;
     }
@@ -173,8 +173,8 @@ const SyncPage = {
             <input class="input" value="us-east-1" />
           </div>
           <div style="display:flex;gap:var(--sp-2);margin-top:var(--sp-4)">
-            <button class="btn btn-primary">${Icons.check(14)} 保存配置</button>
-            <button class="btn btn-secondary">${Icons.refresh(14)} 测试连接</button>
+            <button class="btn btn-primary" onclick="SyncPage.saveConfig()">${Icons.check(14)} 保存配置</button>
+            <button class="btn btn-secondary" onclick="SyncPage.testConnection()">${Icons.refresh(14)} 测试连接</button>
           </div>
         </div>`;
     }
@@ -194,5 +194,16 @@ const SyncPage = {
   async manualPull() {
     const res = await API.sync.pull();
     if (res && res.success) alert('下载成功');
+  },
+
+  async saveConfig() {
+    const res = await API.sync.updateConfig({ service: this._selectedService });
+    if (res && res.success) alert('配置已保存');
+  },
+
+  async testConnection() {
+    alert('正在测试连接...');
+    // 模拟测试延迟
+    setTimeout(() => alert('连接测试成功（mock）'), 1000);
   },
 };

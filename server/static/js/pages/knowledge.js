@@ -35,7 +35,7 @@ const KnowledgePage = {
           <div class="content-title">知识库管理</div>
           <div class="content-subtitle">管理风险审查规则、法规条文和自动学习结果</div>
         </div>
-        <button class="btn btn-primary">${Icons.plus(14)} 新增规则</button>
+        <button class="btn btn-primary" onclick="KnowledgePage.showAddRuleDialog()">${Icons.plus(14)} 新增规则</button>
       </div>
       <div class="content-body animate-in">
         <div class="tabs">${tabsHtml}</div>
@@ -151,8 +151,8 @@ const KnowledgePage = {
         <td class="table-cell-secondary">${(r.confidence * 100).toFixed(0)}%</td>
         <td>
           <div style="display:flex;gap:var(--sp-2)">
-            <button class="btn btn-sm btn-primary">${Icons.check(12)} 通过</button>
-            <button class="btn btn-sm btn-ghost">${Icons.x(12)} 拒绝</button>
+            <button class="btn btn-sm btn-primary" onclick="KnowledgePage.approveRule('${r.id}')">${Icons.check(12)} 通过</button>
+            <button class="btn btn-sm btn-ghost" onclick="KnowledgePage.rejectRule('${r.id}')">${Icons.x(12)} 拒绝</button>
           </div>
         </td>
       </tr>`;
@@ -214,5 +214,29 @@ const KnowledgePage = {
   onCategoryFilter(value) {
     this._categoryFilter = value;
     App.renderCurrentPage();
+  },
+
+  showAddRuleDialog() {
+    const text = prompt('请输入规则内容：');
+    if (text && text.trim()) {
+      const category = prompt('类别（通用/租赁/劳动/装修/外包）：') || '通用';
+      API.knowledge.createRule({ text: text.trim(), category }).then(res => {
+        if (res && res.success) {
+          App.renderCurrentPage();
+        }
+      });
+    }
+  },
+
+  approveRule(id) {
+    API.knowledge.updateRule(id, { status: 'approved' }).then(res => {
+      if (res && res.success) App.renderCurrentPage();
+    });
+  },
+
+  rejectRule(id) {
+    API.knowledge.updateRule(id, { status: 'rejected' }).then(res => {
+      if (res && res.success) App.renderCurrentPage();
+    });
   },
 };

@@ -56,7 +56,6 @@ const Router = (() => {
   /** 处理路由变化 */
   function _handleRouteChange() {
     const path = getCurrentPath();
-    if (path === currentPath) return;
     currentPath = path;
 
     const { route, params } = _resolve(path);

@@ -144,10 +144,10 @@ const SettingsPage = {
         <div class="section-title">数据管理</div>
         <div class="config-card">
           <div class="data-actions">
-            <button class="btn btn-secondary">${Icons.download(14)} 导出全部数据</button>
-            <button class="btn btn-secondary">${Icons.database(14)} 备份数据库</button>
-            <button class="btn btn-secondary">${Icons.refresh(14)} 重建索引</button>
-            <button class="btn btn-danger">${Icons.trash(14)} 清除所有数据</button>
+            <button class="btn btn-secondary" onclick="SettingsPage.exportData()">${Icons.download(14)} 导出全部数据</button>
+            <button class="btn btn-secondary" onclick="SettingsPage.backupDb()">${Icons.database(14)} 备份数据库</button>
+            <button class="btn btn-secondary" onclick="SettingsPage.rebuildIndex()">${Icons.refresh(14)} 重建索引</button>
+            <button class="btn btn-danger" onclick="SettingsPage.clearData()">${Icons.trash(14)} 清除所有数据</button>
           </div>
         </div>
       </div>
@@ -165,5 +165,23 @@ const SettingsPage = {
         </div>
       </div>
       </div>`;
+  },
+
+  exportData() {
+    alert('导出功能将在后端 API 实现后可用');
+  },
+
+  backupDb() {
+    alert('备份功能将在后端 API 实现后可用');
+  },
+
+  rebuildIndex() {
+    alert('重建索引功能将在后端 API 实现后可用');
+  },
+
+  clearData() {
+    if (confirm('确定要清除所有数据吗？此操作不可恢复！')) {
+      alert('清除功能将在后端 API 实现后可用');
+    }
   },
 };
