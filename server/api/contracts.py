@@ -6,13 +6,13 @@ import json
 import logging
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.config import settings
+from server.config import TYPE_EN_MAP, settings
 from server.core.agent import ContractAgent
 from server.core.llm import get_llm_gateway
 from server.core.ocr import get_ocr_engine
@@ -26,19 +26,6 @@ from server.models.database import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/contracts", tags=["contracts"])
-
-# 合同类型中文→英文映射
-TYPE_EN_MAP = {
-    "租赁合同": "rental",
-    "劳动合同": "labor",
-    "装修合同": "renovation",
-    "外包合同": "outsourcing",
-    "借款合同": "loan",
-    "服务合同": "service",
-    "采购合同": "procurement",
-    "合作协议": "cooperation",
-    "其他": "other",
-}
 
 
 @router.get("/")
@@ -270,7 +257,10 @@ async def analyze_contract(
 
         # 更新合同标题和类型
         contract.type = result.contract_type
-        contract.updated_at = datetime.utcnow()
+        contract.updated_at = datetime.now(timezone.utc)
+
+        # 显式提交，确保分析结果持久化
+        await db.commit()
 
     return {
         "success": True,

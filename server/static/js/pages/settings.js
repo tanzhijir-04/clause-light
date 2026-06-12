@@ -156,9 +156,11 @@ const SettingsPage = {
         <div class="section-title">关于</div>
         <div class="config-card">
           <div class="about-section">
-            <div class="about-logo">CL</div>
+            <div class="about-logo">
+              <img src="/asset/合同红绿灯-app-icon--ios-android-.svg" alt="合同红绿灯" style="width:64px;height:64px;" />
+            </div>
             <div class="about-info">
-              <h3>ClauseLight（合同红绿灯）</h3>
+              <h3>合同红绿灯</h3>
               <p>v1.0.0 · MIT License · 开源项目</p>
             </div>
           </div>

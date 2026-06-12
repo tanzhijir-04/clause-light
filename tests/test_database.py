@@ -1,0 +1,195 @@
+"""数据库模型测试"""
+
+from __future__ import annotations
+
+import pytest
+from sqlalchemy import select
+
+from server.models.database import (
+    Analysis,
+    ClauseAnalysis,
+    Contract,
+    KnowledgeRule,
+    LegalReference,
+    SyncLog,
+    async_session_factory,
+)
+
+
+class TestContractModel:
+    """合同模型测试"""
+
+    async def test_create_contract(self, db_session):
+        """测试创建合同"""
+        contract = Contract(
+            id="test_contract_1",
+            title="测试租赁合同",
+            type="租赁合同",
+            source_file="/path/to/file.pdf",
+        )
+        db_session.add(contract)
+        await db_session.commit()
+
+        result = await db_session.execute(select(Contract).where(Contract.id == "test_contract_1"))
+        fetched = result.scalar_one_or_none()
+        assert fetched is not None
+        assert fetched.title == "测试租赁合同"
+        assert fetched.type == "租赁合同"
+        assert fetched.source_file == "/path/to/file.pdf"
+        assert fetched.created_at is not None
+
+    async def test_contract_default_values(self, db_session):
+        """测试合同默认值"""
+        contract = Contract(id="test_contract_2")
+        db_session.add(contract)
+        await db_session.commit()
+
+        result = await db_session.execute(select(Contract).where(Contract.id == "test_contract_2"))
+        fetched = result.scalar_one_or_none()
+        assert fetched is not None
+        assert fetched.title == ""
+        assert fetched.type == "其他"
+
+
+class TestAnalysisModel:
+    """分析结果模型测试"""
+
+    async def test_create_analysis(self, db_session):
+        """测试创建分析结果"""
+        analysis = Analysis(
+            id="test_analysis_1",
+            contract_id="test_contract_1",
+            model_used="deepseek-chat",
+            overall_score=85,
+            summary="合同风险可控",
+            recommendation="sign",
+            source="local",
+        )
+        db_session.add(analysis)
+        await db_session.commit()
+
+        result = await db_session.execute(select(Analysis).where(Analysis.id == "test_analysis_1"))
+        fetched = result.scalar_one_or_none()
+        assert fetched is not None
+        assert fetched.overall_score == 85
+        assert fetched.recommendation == "sign"
+
+
+class TestClauseAnalysisModel:
+    """条款分析模型测试"""
+
+    async def test_create_clause_analysis(self, db_session):
+        """测试创建条款分析"""
+        clause = ClauseAnalysis(
+            id="test_clause_1",
+            analysis_id="test_analysis_1",
+            clause_number="第一条",
+            clause_title="合同目的",
+            clause_content="本合同旨在...",
+            risk_level="green",
+            risk_type="无风险",
+            risk_summary="正常条款",
+            plain_explanation="这是一个正常的合同条款",
+            legal_basis="《合同法》相关规定",
+            severity_score=1,
+            can_negotiate=False,
+        )
+        db_session.add(clause)
+        await db_session.commit()
+
+        result = await db_session.execute(
+            select(ClauseAnalysis).where(ClauseAnalysis.id == "test_clause_1")
+        )
+        fetched = result.scalar_one_or_none()
+        assert fetched is not None
+        assert fetched.risk_level == "green"
+        assert fetched.severity_score == 1
+
+
+class TestKnowledgeRuleModel:
+    """知识库规则模型测试"""
+
+    async def test_create_knowledge_rule(self, db_session):
+        """测试创建知识库规则"""
+        rule = KnowledgeRule(
+            id="test_rule_1",
+            category="租赁",
+            rule_text="租赁合同中违约金不应超过合同总金额的30%",
+            trigger_keywords='["违约金", "租赁"]',
+            confidence=0.8,
+            source="manual",
+            is_active=True,
+        )
+        db_session.add(rule)
+        await db_session.commit()
+
+        result = await db_session.execute(
+            select(KnowledgeRule).where(KnowledgeRule.id == "test_rule_1")
+        )
+        fetched = result.scalar_one_or_none()
+        assert fetched is not None
+        assert fetched.confidence == 0.8
+        assert fetched.is_active is True
+
+    async def test_knowledge_rule_inactive(self, db_session):
+        """测试禁用的规则"""
+        rule = KnowledgeRule(
+            id="test_rule_2",
+            category="劳动",
+            rule_text="劳动合同测试规则",
+            is_active=False,
+        )
+        db_session.add(rule)
+        await db_session.commit()
+
+        result = await db_session.execute(
+            select(KnowledgeRule).where(KnowledgeRule.id == "test_rule_2")
+        )
+        fetched = result.scalar_one_or_none()
+        assert fetched is not None
+        assert fetched.is_active is False
+
+
+class TestSyncLogModel:
+    """同步日志模型测试"""
+
+    async def test_create_sync_log(self, db_session):
+        """测试创建同步日志"""
+        log = SyncLog(
+            id="test_log_1",
+            sync_type="webdav",
+            direction="push",
+            status="success",
+            details="上传完成",
+        )
+        db_session.add(log)
+        await db_session.commit()
+
+        result = await db_session.execute(select(SyncLog).where(SyncLog.id == "test_log_1"))
+        fetched = result.scalar_one_or_none()
+        assert fetched is not None
+        assert fetched.sync_type == "webdav"
+        assert fetched.direction == "push"
+
+
+class TestLegalReferenceModel:
+    """法规条文模型测试"""
+
+    async def test_create_legal_reference(self, db_session):
+        """测试创建法规条文"""
+        ref = LegalReference(
+            id="test_ref_1",
+            law_name="中华人民共和国民法典",
+            article_number="第五百七十七条",
+            content="当事人一方不履行合同义务或者履行合同义务不符合约定的，应当承担继续履行、采取补救措施或者赔偿损失等违约责任。",
+            tags='["合同违约", "损害赔偿"]',
+        )
+        db_session.add(ref)
+        await db_session.commit()
+
+        result = await db_session.execute(
+            select(LegalReference).where(LegalReference.id == "test_ref_1")
+        )
+        fetched = result.scalar_one_or_none()
+        assert fetched is not None
+        assert fetched.law_name == "中华人民共和国民法典"

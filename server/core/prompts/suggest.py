@@ -16,7 +16,8 @@ def suggest_prompt(clause: str, risk_type: str) -> list[dict]:
                 '  "modification_reason": "理由（30字内）",\n'
                 '  "can_negotiate": true/false,\n'
                 '  "negotiation_tip": "谈判话术（如有）"\n'
-                '}'
+                '}\n\n'
+                "只返回 JSON 对象，不要包含任何其他文字、解释或 markdown 格式。"
             ),
         },
         {

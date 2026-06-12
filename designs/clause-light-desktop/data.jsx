@@ -1,4 +1,4 @@
-/* Mock data for ClauseLight Desktop prototype */
+/* Mock data for 合同红绿灯 Desktop prototype */
 const MOCK_CONTRACTS = [
   { id: '1', title: '房屋租赁合同', type: '租赁合同', typeEn: 'rental', score: 42, riskLevel: 'red', redCount: 5, yellowCount: 3, greenCount: 2, createdAt: '2026-06-10', status: 'analyzed', model: 'deepseek-chat' },
   { id: '2', title: '劳动合同（三年期）', type: '劳动合同', typeEn: 'labor', score: 68, riskLevel: 'yellow', redCount: 2, yellowCount: 4, greenCount: 6, createdAt: '2026-06-09', status: 'analyzed', model: 'deepseek-chat' },

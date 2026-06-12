@@ -12,6 +12,7 @@ from typing import Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from server.config import TYPE_EN_MAP
 from server.core.knowledge import KnowledgeEngine
 from server.core.llm import LLMGateway, get_llm_gateway
 from server.core.ocr import OCREngine, get_ocr_engine
@@ -28,19 +29,6 @@ from server.models.database import (
 )
 
 logger = logging.getLogger(__name__)
-
-# 合同类型中文→英文映射
-TYPE_EN_MAP = {
-    "租赁合同": "rental",
-    "劳动合同": "labor",
-    "装修合同": "renovation",
-    "外包合同": "outsourcing",
-    "借款合同": "loan",
-    "服务合同": "service",
-    "采购合同": "procurement",
-    "合作协议": "cooperation",
-    "其他": "other",
-}
 
 
 @dataclass
@@ -187,8 +175,18 @@ class ContractAgent:
                     "plain_explanation": "",
                     "severity_score": 1,
                 })
-            elif res:
+            elif res is not None:
                 analyzed_clauses.append({**clauses[i], **res})
+            else:
+                # _analyze_clause 返回 None，保留原始条款并标记为未分析
+                analyzed_clauses.append({
+                    **clauses[i],
+                    "risk_level": "green",
+                    "risk_type": "未分析",
+                    "risk_summary": "分析结果为空",
+                    "plain_explanation": "",
+                    "severity_score": 1,
+                })
 
         result.clauses = analyzed_clauses
 

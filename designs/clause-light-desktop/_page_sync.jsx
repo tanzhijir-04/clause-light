@@ -54,7 +54,7 @@ const SyncPage = () => (
               </div>
               <div className="form-group">
                 <label className="form-label">远程路径</label>
-                <input className="input" defaultValue="/ClauseLight/" />
+                <input className="input" defaultValue="/合同红绿灯/" />
               </div>
               <div style={{ display: 'flex', gap: 'var(--sp-2)', marginTop: 'var(--sp-4)' }}>
                 <button className="btn btn-primary"><IconCheck size={14} /> 保存配置</button>

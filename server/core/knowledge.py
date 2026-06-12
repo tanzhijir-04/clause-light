@@ -5,26 +5,21 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import date, datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.models.database import KnowledgeRule, LegalReference
+from server.config import TYPE_CATEGORY_MAP
+from server.models.database import (
+    Analysis,
+    ClauseAnalysis,
+    Contract,
+    KnowledgeRule,
+    LegalReference,
+)
 
 logger = logging.getLogger(__name__)
-
-# 合同类型→规则类别的映射
-TYPE_CATEGORY_MAP = {
-    "租赁合同": "租赁",
-    "劳动合同": "劳动",
-    "装修合同": "装修",
-    "外包合同": "外包",
-    "借款合同": "借款",
-    "服务合同": "服务",
-    "采购合同": "采购",
-    "合作协议": "合作",
-}
 
 
 class KnowledgeEngine:
@@ -124,7 +119,7 @@ class KnowledgeEngine:
         if "trigger_keywords" in data:
             rule.trigger_keywords = json.dumps(data["trigger_keywords"], ensure_ascii=False)
 
-        rule.updated_at = datetime.utcnow()
+        rule.updated_at = datetime.now(timezone.utc)
         logger.info("更新规则: id=%s", rule_id)
 
     async def delete_rule(self, rule_id: str) -> None:
@@ -137,7 +132,7 @@ class KnowledgeEngine:
             logger.info("删除规则: id=%s", rule_id)
 
     async def get_stats(self) -> dict:
-        """知识库统计"""
+        """获取仪表盘统计数据"""
         # 规则总数
         count_stmt = select(func.count()).select_from(KnowledgeRule)
         total_rules = (await self.db.execute(count_stmt)).scalar() or 0
@@ -159,11 +154,60 @@ class KnowledgeEngine:
         )
         pending = (await self.db.execute(pending_stmt)).scalar() or 0
 
+        # 合同总数
+        contract_count_stmt = select(func.count()).select_from(Contract)
+        total_contracts = (await self.db.execute(contract_count_stmt)).scalar() or 0
+
+        # 本月新增合同数
+        now = datetime.now(timezone.utc)
+        month_stmt = (
+            select(func.count())
+            .select_from(Contract)
+            .where(extract("year", Contract.created_at) == now.year)
+            .where(extract("month", Contract.created_at) == now.month)
+        )
+        this_month = (await self.db.execute(month_stmt)).scalar() or 0
+
+        # 平均风险分
+        avg_score_stmt = select(func.avg(Analysis.overall_score)).select_from(Analysis)
+        avg_score = (await self.db.execute(avg_score_stmt)).scalar() or 0.0
+
+        # 高/中/低风险条款数
+        red_stmt = (
+            select(func.count())
+            .select_from(ClauseAnalysis)
+            .where(ClauseAnalysis.risk_level == "red")
+        )
+        red_count = (await self.db.execute(red_stmt)).scalar() or 0
+
+        yellow_stmt = (
+            select(func.count())
+            .select_from(ClauseAnalysis)
+            .where(ClauseAnalysis.risk_level == "yellow")
+        )
+        yellow_count = (await self.db.execute(yellow_stmt)).scalar() or 0
+
+        green_stmt = (
+            select(func.count())
+            .select_from(ClauseAnalysis)
+            .where(ClauseAnalysis.risk_level == "green")
+        )
+        green_count = (await self.db.execute(green_stmt)).scalar() or 0
+
         return {
+            # 原有字段
             "totalRules": total_rules,
             "avgConfidence": round(float(avg_confidence), 2),
             "totalLaws": total_laws,
             "pendingReview": pending,
+            # 新增字段
+            "totalContracts": total_contracts,
+            "thisMonth": this_month,
+            "avgScore": round(float(avg_score), 1),
+            "totalDevices": 1,  # 暂时硬编码
+            "redCount": red_count,
+            "yellowCount": yellow_count,
+            "greenCount": green_count,
         }
 
     async def get_pending(self) -> list[dict]:
@@ -220,7 +264,7 @@ class KnowledgeEngine:
         if rule:
             rule.confidence = min(rule.confidence + 0.2, 1.0)
             rule.source = "manual"
-            rule.updated_at = datetime.utcnow()
+            rule.updated_at = datetime.now(timezone.utc)
             logger.info("审核通过规则: id=%s", rule_id)
 
     async def reject_rule(self, rule_id: str) -> None:
@@ -230,5 +274,5 @@ class KnowledgeEngine:
         rule = result.scalar_one_or_none()
         if rule:
             rule.is_active = False
-            rule.updated_at = datetime.utcnow()
+            rule.updated_at = datetime.now(timezone.utc)
             logger.info("审核拒绝规则: id=%s", rule_id)

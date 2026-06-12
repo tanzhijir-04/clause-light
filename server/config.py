@@ -45,3 +45,30 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# ── 共享常量 ──
+
+# 合同类型中文→英文映射
+TYPE_EN_MAP = {
+    "租赁合同": "rental",
+    "劳动合同": "labor",
+    "装修合同": "renovation",
+    "外包合同": "outsourcing",
+    "借款合同": "loan",
+    "服务合同": "service",
+    "采购合同": "procurement",
+    "合作协议": "cooperation",
+    "其他": "other",
+}
+
+# 合同类型→知识库规则类别映射
+TYPE_CATEGORY_MAP = {
+    "租赁合同": "租赁",
+    "劳动合同": "劳动",
+    "装修合同": "装修",
+    "外包合同": "外包",
+    "借款合同": "借款",
+    "服务合同": "服务",
+    "采购合同": "采购",
+    "合作协议": "合作",
+}

@@ -33,7 +33,7 @@ async def get_config():
             "enabled": False,
             "url": "",
             "username": "",
-            "path": "/ClauseLight/",
+            "path": "/合同红绿灯/",
         },
         "git": {"enabled": False},
         "s3": {"enabled": False},

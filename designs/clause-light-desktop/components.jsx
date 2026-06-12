@@ -56,8 +56,10 @@ const Toggle = ({ on, onChange }) => (
 const Sidebar = ({ activePage, onNavigate, variant, theme, onThemeToggle }) => (
   <div className="sidebar">
     <div className="sidebar-header">
-      <div className="sidebar-logo">CL</div>
-      <span className="sidebar-title">ClauseLight</span>
+      <div className="sidebar-logo">
+        <img src="../asset/合同红绿灯-transparent-mark.svg" alt="合同红绿灯" style={{width: 32, height: 32}} />
+      </div>
+      <span className="sidebar-title">合同红绿灯</span>
     </div>
     <nav className="sidebar-nav">
       <div className="sidebar-section-label">概览</div>

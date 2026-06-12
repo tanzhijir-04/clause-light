@@ -136,8 +136,10 @@ const Components = (() => {
 
     return `<div class="sidebar">
       <div class="sidebar-header">
-        <div class="sidebar-logo">CL</div>
-        <span class="sidebar-title">ClauseLight</span>
+        <div class="sidebar-logo">
+          <img src="/asset/合同红绿灯-transparent-mark.svg" alt="合同红绿灯" style="width:32px;height:32px;" />
+        </div>
+        <span class="sidebar-title">合同红绿灯</span>
       </div>
       <nav class="sidebar-nav">${navHtml}</nav>
       <div class="sidebar-footer">

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import AsyncGenerator
@@ -158,7 +160,6 @@ class LLMGateway:
                     )
                     # 重试前短暂等待
                     if attempt < max_retries:
-                        import asyncio
                         await asyncio.sleep(1.0 * (attempt + 1))
 
             # 当前提供商所有重试用完，切换下一个
@@ -209,7 +210,6 @@ class LLMGateway:
             pass
 
         # 尝试提取 ```json ... ``` 块
-        import re
         match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", content, re.DOTALL)
         if match:
             try:

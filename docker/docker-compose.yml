@@ -9,6 +9,8 @@ services:
       - "8080:8080"
     volumes:
       - ../data:/app/data
+      - ../shared:/app/shared
+      - ../asset:/app/asset
     env_file:
       - ../.env
     restart: unless-stopped

@@ -120,9 +120,9 @@ const SettingsPage = () => (
         <div className="section-title">关于</div>
         <div className="config-card">
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
-            <div className="sidebar-logo" style={{ width: 36, height: 36, fontSize: 'var(--text-md)' }}>CL</div>
+            <img src="../asset/合同红绿灯-app-icon--ios-android-.svg" alt="合同红绿灯" style={{ width: 64, height: 64 }} />
             <div>
-              <div style={{ fontWeight: 600 }}>ClauseLight（合同红绿灯）</div>
+              <div style={{ fontWeight: 600 }}>合同红绿灯</div>
               <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>v1.0.0 · MIT License · 开源项目</div>
             </div>
           </div>

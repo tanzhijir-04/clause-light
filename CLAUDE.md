@@ -136,3 +136,4 @@ clause-light/
 - 所有前端代码无外部 CDN 依赖（PWA 离线可用）
 - Git commit message 使用中文
 - 代码注释使用中文
+- **每次完成代码改动后，立即提交并推送到 GitHub**

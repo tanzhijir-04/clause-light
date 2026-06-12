@@ -25,7 +25,8 @@ def score_prompt(all_analyses: list[dict]) -> list[dict]:
                 '  "top_risks": ["最危险的3个风险"],\n'
                 '  "one_line_summary": "一句话总结",\n'
                 '  "recommendation": "sign" | "negotiate_first" | "reject"\n'
-                '}'
+                '}\n\n'
+                "只返回 JSON 对象，不要包含任何其他文字、解释或 markdown 格式。"
             ),
         },
         {

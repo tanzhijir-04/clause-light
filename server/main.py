@@ -1,4 +1,4 @@
-"""ClauseLight — FastAPI 主入口"""
+"""合同红绿灯 — FastAPI 主入口"""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """应用启动/关闭"""
     # 启动
-    logger.info("ClauseLight 启动中...")
+    logger.info("合同红绿灯 启动中...")
 
     # 确保 data 目录存在
     os.makedirs("data", exist_ok=True)
@@ -46,11 +46,11 @@ async def lifespan(app: FastAPI):
     # 导入基础规则（如果知识库为空）
     await _init_default_rules()
 
-    logger.info("ClauseLight 启动完成 ✅")
+    logger.info("合同红绿灯 启动完成 ✅")
     yield
 
     # 关闭
-    logger.info("ClauseLight 已关闭")
+    logger.info("合同红绿灯 已关闭")
 
 
 async def _init_default_rules():
@@ -98,7 +98,7 @@ async def _init_default_rules():
 # ── 创建 App ──
 
 app = FastAPI(
-    title="ClauseLight",
+    title="合同红绿灯",
     version="1.0.0",
     description="合同红绿灯 — 智能合同风险审查工具",
     lifespan=lifespan,
@@ -166,16 +166,19 @@ async def list_devices():
 
 # ── LLM 配置接口 ──
 
+LLM_CONFIG_FILE = os.path.join("data", "llm_config.json")
 
-@app.get("/api/settings/llm")
-async def get_llm_settings():
-    """获取 LLM 配置"""
-    return {
+
+def _load_llm_config() -> dict:
+    """从文件加载 LLM 配置"""
+    import json
+
+    default_config = {
         "remote": {
             "enabled": bool(settings.LLM_DEEPSEEK_API_KEY),
             "provider": "deepseek" if settings.LLM_DEEPSEEK_API_KEY else "openai",
             "baseUrl": "https://api.deepseek.com/v1",
-            "apiKey": "***" if settings.LLM_DEEPSEEK_API_KEY else "",
+            "apiKey": settings.LLM_DEEPSEEK_API_KEY or "",
             "models": {
                 "classify": "deepseek-chat",
                 "analyze": "deepseek-chat",
@@ -193,12 +196,70 @@ async def get_llm_settings():
         },
     }
 
+    if os.path.exists(LLM_CONFIG_FILE):
+        try:
+            with open(LLM_CONFIG_FILE, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+                # 合并默认配置和保存的配置
+                for key in default_config:
+                    if key not in saved:
+                        saved[key] = default_config[key]
+                    elif isinstance(default_config[key], dict):
+                        for subkey in default_config[key]:
+                            if subkey not in saved[key]:
+                                saved[key][subkey] = default_config[key][subkey]
+                return saved
+        except Exception as e:
+            logger.warning("加载 LLM 配置失败: %s", e)
+
+    return default_config
+
+
+def _save_llm_config(config: dict) -> None:
+    """保存 LLM 配置到文件"""
+    import json
+
+    os.makedirs("data", exist_ok=True)
+    with open(LLM_CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
+
+
+@app.get("/api/settings/llm")
+async def get_llm_settings():
+    """获取 LLM 配置"""
+    config = _load_llm_config()
+    # 脱敏 API Key
+    if config["remote"].get("apiKey"):
+        config["remote"]["apiKey"] = "***"
+    return config
+
 
 @app.put("/api/settings/llm")
 async def update_llm_settings(request: Request):
     """更新 LLM 配置"""
     data = await request.json()
-    logger.info("LLM 配置已更新")
+
+    # 验证数据结构
+    if "remote" not in data and "local" not in data:
+        return {"success": False, "error": "无效的配置格式"}
+
+    # 加载现有配置
+    current_config = _load_llm_config()
+
+    # 更新配置
+    if "remote" in data:
+        current_config["remote"].update(data["remote"])
+        # 如果前端传了 "***"，保留原 API Key
+        if current_config["remote"].get("apiKey") == "***":
+            current_config["remote"]["apiKey"] = _load_llm_config()["remote"].get("apiKey", "")
+
+    if "local" in data:
+        current_config["local"].update(data["local"])
+
+    # 保存配置
+    _save_llm_config(current_config)
+    logger.info("LLM 配置已更新并保存")
+
     return {"success": True}
 
 
@@ -213,6 +274,11 @@ if os.path.isdir(static_dir):
 mobile_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "mobile")
 if os.path.isdir(mobile_dir):
     app.mount("/mobile", StaticFiles(directory=mobile_dir, html=True), name="mobile")
+
+# 资源文件（logo、图标等）
+asset_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "asset")
+if os.path.isdir(asset_dir):
+    app.mount("/asset", StaticFiles(directory=asset_dir), name="asset")
 
 
 # ── 根路径重定向 ──

@@ -115,7 +115,7 @@ const SyncPage = {
           </div>
           <div class="form-group">
             <label class="form-label">远程路径</label>
-            <input class="input" value="/ClauseLight/" />
+            <input class="input" value="/合同红绿灯/" />
           </div>
           <div style="display:flex;gap:var(--sp-2);margin-top:var(--sp-4)">
             <button class="btn btn-primary" onclick="SyncPage.saveConfig()">${Icons.check(14)} 保存配置</button>

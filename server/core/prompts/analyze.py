@@ -25,7 +25,8 @@ def analyze_prompt(
                 '  "plain_explanation": "大白话解释（50字内）",\n'
                 '  "legal_basis": "相关法律依据",\n'
                 '  "severity_score": 1-10\n'
-                '}'
+                '}\n\n'
+                "只返回 JSON 对象，不要包含任何其他文字、解释或 markdown 格式。"
             ),
         },
         {
