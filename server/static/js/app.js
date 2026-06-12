@@ -8,25 +8,29 @@ const App = (() => {
     knowledge: KnowledgePage,
     sync: SyncPage,
     settings: SettingsPage,
+    contractDetail: ContractDetailPage,
   };
 
   let currentRoute = 'dashboard';
+  let currentParams = {};
 
   /** 渲染指定页面 */
-  async function renderPage(route) {
+  async function renderPage(route, params = {}) {
     currentRoute = route;
+    currentParams = params;
     const page = pages[route];
     if (!page) return;
 
     const app = document.getElementById('app');
 
-    // 渲染侧边栏
-    const sidebarHtml = Components.Sidebar(route);
+    // 渲染侧边栏（合同详情页也高亮"合同管理"）
+    const sidebarRoute = route === 'contractDetail' ? 'contracts' : route;
+    const sidebarHtml = Components.Sidebar(sidebarRoute);
 
-    // 渲染页面内容（每个页面自己包含 header + body）
+    // 渲染页面内容
     let contentHtml = '';
     try {
-      contentHtml = await page.render();
+      contentHtml = await page.render(params);
     } catch (e) {
       console.error('页面渲染错误:', e);
       contentHtml = `<div class="empty-state">加载失败，请刷新页面</div>`;
@@ -53,43 +57,41 @@ const App = (() => {
 
   /** 渲染当前页面（用于状态更新时重新渲染） */
   function renderCurrentPage() {
-    renderPage(currentRoute);
+    renderPage(currentRoute, currentParams);
   }
 
   /** 切换主题 */
   function toggleTheme() {
     Theme.toggle();
-    // 重新渲染当前页面以更新主题图标
-    renderPage(currentRoute);
+    renderPage(currentRoute, currentParams);
   }
 
   /** 初始化 */
   function init() {
-    // 初始化主题
     Theme.init();
 
-    // 注册路由
-    Router.register('dashboard', () => renderPage('dashboard'));
-    Router.register('contracts', () => renderPage('contracts'));
-    Router.register('knowledge', () => renderPage('knowledge'));
-    Router.register('sync', () => renderPage('sync'));
-    Router.register('settings', () => renderPage('settings'));
+    // 注册路由（handler 接收 params）
+    Router.register('dashboard', (params) => renderPage('dashboard', params));
+    Router.register('contracts', (params) => renderPage('contracts', params));
+    Router.register('contractDetail', (params) => renderPage('contractDetail', params));
+    Router.register('knowledge', (params) => renderPage('knowledge', params));
+    Router.register('sync', (params) => renderPage('sync', params));
+    Router.register('settings', (params) => renderPage('settings', params));
 
     // 路由变化时更新侧边栏高亮
     Router.onChange(route => {
       currentRoute = route;
+      const sidebarRoute = route === 'contractDetail' ? 'contracts' : route;
       document.querySelectorAll('.sidebar-nav-item').forEach(item => {
         const page = item.getAttribute('data-page');
-        item.classList.toggle('active', page === route);
+        item.classList.toggle('active', page === sidebarRoute);
       });
     });
 
-    // 初始化路由
     Router.init();
   }
 
   return { init, renderPage, renderCurrentPage, toggleTheme };
 })();
 
-// 启动应用
 document.addEventListener('DOMContentLoaded', App.init);

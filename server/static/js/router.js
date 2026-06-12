@@ -1,9 +1,10 @@
 /**
- * 简易 Hash 路由器
+ * 简易 Hash 路由器（支持参数路由）
  */
 const Router = (() => {
+  // 注册的路由：{ 'dashboard': handler, 'contracts': handler, ... }
   const routes = {};
-  let currentRoute = '';
+  let currentPath = '';
   let listeners = [];
 
   /** 注册路由 */
@@ -11,18 +12,33 @@ const Router = (() => {
     routes[name] = handler;
   }
 
-  /** 获取当前路由名 */
-  function getCurrent() {
-    const hash = location.hash.replace('#/', '').replace('#', '') || 'dashboard';
-    return routes[hash] ? hash : 'dashboard';
+  /** 获取当前路径（不含 #/） */
+  function getCurrentPath() {
+    return location.hash.replace('#/', '').replace('#', '') || 'dashboard';
   }
 
-  /** 导航到指定路由 */
-  function navigate(name) {
-    if (location.hash !== '#/' + name) {
-      location.hash = '#/' + name;
+  /** 解析路径，返回 { route, params } */
+  function _resolve(path) {
+    // 精确匹配
+    if (routes[path]) {
+      return { route: path, params: {} };
+    }
+    // 参数匹配：contracts/123 → contracts, { id: '123' }
+    const parts = path.split('/');
+    if (parts.length >= 2) {
+      const baseRoute = parts[0];
+      if (routes[baseRoute]) {
+        return { route: baseRoute, params: { id: parts.slice(1).join('/') } };
+      }
+    }
+    return { route: 'dashboard', params: {} };
+  }
+
+  /** 导航到指定路径 */
+  function navigate(path) {
+    if (location.hash !== '#/' + path) {
+      location.hash = '#/' + path;
     } else {
-      // hash 相同但需要触发渲染
       _handleRouteChange();
     }
   }
@@ -32,23 +48,28 @@ const Router = (() => {
     listeners.push(fn);
   }
 
+  /** 获取当前路由名（不含参数） */
+  function getCurrent() {
+    return _resolve(getCurrentPath()).route;
+  }
+
   /** 处理路由变化 */
   function _handleRouteChange() {
-    const route = getCurrent();
-    if (route === currentRoute) return;
-    currentRoute = route;
+    const path = getCurrentPath();
+    if (path === currentPath) return;
+    currentPath = path;
+
+    const { route, params } = _resolve(path);
     const handler = routes[route];
     if (handler) {
-      handler();
+      handler(params);
     }
-    // 通知监听器
-    listeners.forEach(fn => fn(route));
+    listeners.forEach(fn => fn(route, params));
   }
 
   /** 初始化路由 */
   function init() {
     window.addEventListener('hashchange', _handleRouteChange);
-    // 初始路由
     if (!location.hash) {
       location.hash = '#/dashboard';
     } else {

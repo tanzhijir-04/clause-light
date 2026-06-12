@@ -17,7 +17,7 @@ const ContractsPage = {
     let tableRows = '';
     contracts.forEach(c => {
       const scoreClass = c.score >= 70 ? 'score-green' : c.score >= 50 ? 'score-yellow' : 'score-red';
-      tableRows += `<tr class="table-row-clickable" onclick="Router.navigate('contracts')">
+      tableRows += `<tr class="table-row-clickable" onclick="Router.navigate('contracts/${c.id}')">
         <td style="font-weight:500">${c.title}</td>
         <td class="table-cell-secondary">${c.type}</td>
         <td>${Components.RiskBadge(c.riskLevel)}</td>
