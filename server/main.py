@@ -183,6 +183,17 @@ async def list_devices():
 LLM_CONFIG_FILE = os.path.join("data", "llm_config.json")
 
 
+def _deep_merge(base: dict, override: dict) -> dict:
+    """递归深合并：override 中的值覆盖 base，缺失的键从 base 补齐"""
+    result = base.copy()
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
 def _load_llm_config() -> dict:
     """从文件加载 LLM 配置"""
     import json
@@ -214,15 +225,7 @@ def _load_llm_config() -> dict:
         try:
             with open(LLM_CONFIG_FILE, "r", encoding="utf-8") as f:
                 saved = json.load(f)
-                # 合并默认配置和保存的配置
-                for key in default_config:
-                    if key not in saved:
-                        saved[key] = default_config[key]
-                    elif isinstance(default_config[key], dict):
-                        for subkey in default_config[key]:
-                            if subkey not in saved[key]:
-                                saved[key][subkey] = default_config[key][subkey]
-                return saved
+                return _deep_merge(default_config, saved)
         except Exception as e:
             logger.warning("加载 LLM 配置失败: %s", e)
 
@@ -240,9 +243,9 @@ def _save_llm_config(config: dict) -> None:
 
 @app.get("/api/settings/llm")
 async def get_llm_settings():
-    """获取 LLM 配置"""
+    """获取 LLM 配置（apiKey 脱敏返回）"""
     config = _load_llm_config()
-    # 脱敏 API Key
+    # 脱敏：用占位符替换真实 key，前端不需要知道真实值
     if config["remote"].get("apiKey"):
         config["remote"]["apiKey"] = "***"
     return config
@@ -253,24 +256,24 @@ async def update_llm_settings(request: Request):
     """更新 LLM 配置"""
     data = await request.json()
 
-    # 验证数据结构
     if "remote" not in data and "local" not in data:
         return {"success": False, "error": "无效的配置格式"}
 
-    # 加载现有配置
+    # 加载现有配置（保留真实 apiKey）
     current_config = _load_llm_config()
 
-    # 更新配置
+    # 更新 remote
     if "remote" in data:
-        current_config["remote"].update(data["remote"])
-        # 如果前端传了 "***"，保留原 API Key
-        if current_config["remote"].get("apiKey") == "***":
-            current_config["remote"]["apiKey"] = _load_llm_config()["remote"].get("apiKey", "")
+        incoming = data["remote"]
+        # 如果前端传了占位符，保留原 apiKey；否则用新值
+        if incoming.get("apiKey") in ("***", "", None):
+            incoming["apiKey"] = current_config["remote"].get("apiKey", "")
+        current_config["remote"] = _deep_merge(current_config["remote"], incoming)
 
+    # 更新 local
     if "local" in data:
-        current_config["local"].update(data["local"])
+        current_config["local"] = _deep_merge(current_config["local"], data["local"])
 
-    # 保存配置
     _save_llm_config(current_config)
     logger.info("LLM 配置已更新并保存")
 

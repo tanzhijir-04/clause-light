@@ -6,6 +6,17 @@ const SettingsPage = {
   _remoteEnabled: false,
   _localEnabled: false,
 
+  /** 自动保存防抖定时器 */
+  _saveTimer: null,
+
+  /** 提供商 → 默认 Base URL 映射 */
+  _providerUrls: {
+    deepseek: 'https://api.deepseek.com/v1',
+    openai: 'https://api.openai.com/v1',
+    qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    custom: '',
+  },
+
   async render() {
     const llmConfig = await API.settings.llm();
     const devices = await API.settings.devices();
@@ -68,7 +79,7 @@ const SettingsPage = {
               <option value="deepseek" ${remote.provider === 'deepseek' ? 'selected' : ''}>DeepSeek</option>
               <option value="openai" ${remote.provider === 'openai' ? 'selected' : ''}>OpenAI</option>
               <option value="qwen" ${remote.provider === 'qwen' ? 'selected' : ''}>通义千问</option>
-              <option value="custom">自定义</option>
+              <option value="custom" ${remote.provider === 'custom' ? 'selected' : ''}>自定义</option>
             </select>
           </div>
           <div class="form-group">
@@ -123,7 +134,10 @@ const SettingsPage = {
           </div>
         </div>
 
-        <button class="btn btn-primary" onclick="SettingsPage.saveLLM()">保存配置</button>
+        <div style="display:flex;align-items:center;gap:var(--sp-3)">
+          <button class="btn btn-primary" onclick="SettingsPage.saveLLM()">保存配置</button>
+          <span id="llm-save-status" style="font-size:var(--text-xs);color:var(--text-tertiary)"></span>
+        </div>
       </div>
 
       <div class="section">
@@ -175,18 +189,56 @@ const SettingsPage = {
       </div>`;
   },
 
-  /** 初始化 Toggle 回调（页面渲染后调用） */
+  /** 初始化 Toggle 回调 + 自动保存事件（页面渲染后调用） */
   initToggles() {
+    // Toggle 回调
     Components.onToggle('llm-remote', (on) => {
       SettingsPage._remoteEnabled = on;
+      SettingsPage._debouncedSave();
     });
     Components.onToggle('llm-local', (on) => {
       SettingsPage._localEnabled = on;
+      SettingsPage._debouncedSave();
     });
+
+    // 给所有 LLM 表单字段绑定自动保存
+    const fields = [
+      'llm-provider', 'llm-baseUrl', 'llm-apiKey',
+      'llm-classify', 'llm-analyze', 'llm-explain',
+      'llm-local-endpoint', 'llm-local-classify', 'llm-local-analyze', 'llm-local-explain',
+    ];
+    fields.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.addEventListener('input', () => SettingsPage._debouncedSave());
+        el.addEventListener('change', () => SettingsPage._debouncedSave());
+      }
+    });
+
+    // 提供商下拉 → 自动填充 Base URL
+    const providerEl = document.getElementById('llm-provider');
+    if (providerEl) {
+      providerEl.addEventListener('change', (e) => {
+        const url = SettingsPage._providerUrls[e.target.value];
+        if (url !== undefined) {
+          const baseUrlEl = document.getElementById('llm-baseUrl');
+          // 只在用户没手动改过时自动填充，或者当前值是某个已知 provider 的 url
+          if (baseUrlEl && Object.values(SettingsPage._providerUrls).includes(baseUrlEl.value)) {
+            baseUrlEl.value = url;
+          }
+        }
+      });
+    }
+  },
+
+  /** 防抖自动保存（500ms） */
+  _debouncedSave() {
+    if (SettingsPage._saveTimer) clearTimeout(SettingsPage._saveTimer);
+    SettingsPage._saveTimer = setTimeout(() => SettingsPage.saveLLM(true), 500);
   },
 
   /** 保存 LLM 配置 */
-  async saveLLM() {
+  async saveLLM(silent = false) {
     const data = {
       remote: {
         enabled: SettingsPage._remoteEnabled,
@@ -212,9 +264,20 @@ const SettingsPage = {
 
     try {
       await API.settings.updateLLM(data);
-      Components.toast('配置已保存', 'success');
+      if (!silent) {
+        Components.toast('配置已保存', 'success');
+      } else {
+        const statusEl = document.getElementById('llm-save-status');
+        if (statusEl) {
+          statusEl.textContent = '已自动保存';
+          statusEl.style.color = 'var(--risk-green)';
+          setTimeout(() => { statusEl.textContent = ''; }, 2000);
+        }
+      }
     } catch (e) {
-      Components.toast('保存失败: ' + e.message, 'error');
+      if (!silent) {
+        Components.toast('保存失败: ' + e.message, 'error');
+      }
     }
   },
 
