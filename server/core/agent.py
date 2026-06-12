@@ -40,6 +40,7 @@ class AnalysisResult:
     green_count: int = 0
     needs_review: list[str] = field(default_factory=list)
     top_risks: list[str] = field(default_factory=list)
+    error: str = ""  # 分析失败时的错误信息，调用方可据此判断成功/失败
 
 
 # Worker 维度列表
@@ -84,6 +85,7 @@ class ContractAgent:
             )
             if not ocr_result or not ocr_result.full_text.strip():
                 logger.error("OCR 识别结果为空")
+                result.error = "OCR 识别结果为空，无法分析"
                 return result
             full_text = ocr_result.full_text
 
@@ -92,6 +94,7 @@ class ContractAgent:
                 logger.warning("OCR 置信度较低: %.2f", ocr_result.confidence_avg)
         except Exception as e:
             logger.error("OCR 识别失败: %s", e)
+            result.error = f"OCR 识别失败: {e}"
             return result
 
         # ── Stage 1: 结构解析 ──

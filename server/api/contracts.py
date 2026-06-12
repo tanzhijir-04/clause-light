@@ -223,10 +223,23 @@ async def analyze_contract(
             contract_type_hint=contract_type if contract_type else None,
         )
     except Exception as e:
-        logger.error("合同分析失败: %s", e)
-        # 提交合同记录（即使分析失败）
+        logger.error("合同分析异常: %s", e)
         await db.commit()
-        raise HTTPException(status_code=500, detail=f"合同分析失败: {str(e)}")
+        return {
+            "success": False,
+            "contractId": contract.id,
+            "error": f"合同分析异常: {str(e)}",
+        }
+
+    # 检查分析是否失败（问题 5 修复：不再返回 success:true + score:0）
+    if result.error:
+        logger.warning("合同分析失败: %s", result.error)
+        await db.commit()
+        return {
+            "success": False,
+            "contractId": contract.id,
+            "error": result.error,
+        }
 
     # 保存分析结果
     if result.contract_id:

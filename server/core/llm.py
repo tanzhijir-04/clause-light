@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -31,9 +32,9 @@ class LLMResponse:
     latency_ms: int = 0
 
 
-# ── 任务→模型映射 ──
+# ── 硬编码映射（仅作 fallback，优先级最低） ──
 
-TASK_MODEL_MAP: dict[str, dict[str, str]] = {
+_TASK_MODEL_FALLBACK: dict[str, dict[str, str]] = {
     "deepseek": {
         "classification": "deepseek-chat",
         "analysis": "deepseek-chat",
@@ -48,8 +49,27 @@ TASK_MODEL_MAP: dict[str, dict[str, str]] = {
     },
 }
 
-# 提供商优先级（故障切换顺序）
-PROVIDER_PRIORITY = ["deepseek", "openai"]
+# 任务名 → 配置文件中 models 字段的 key 映射
+_TASK_TO_CONFIG_KEY: dict[str, str] = {
+    "classification": "classify",
+    "analysis": "analyze",
+    "explanation": "explain",
+    "scoring": "analyze",       # 评分用 analyze 模型
+}
+
+
+# ── 深合并工具 ──
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """递归深合并：override 中的值覆盖 base，缺失的键从 base 补齐"""
+    result = base.copy()
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
 
 
 # ── 网关 ──
@@ -60,14 +80,13 @@ class LLMGateway:
 
     def __init__(self) -> None:
         self._clients: dict[str, AsyncOpenAI] = {}
-        self._config_loaded = False
+        self._config: dict = {}
         self._init_clients()
+
+    # ── 配置加载 ──
 
     def _load_config_from_file(self) -> dict:
         """从配置文件加载 LLM 设置"""
-        import json
-        import os
-
         config_file = os.path.join("data", "llm_config.json")
         default_config = {
             "remote": {
@@ -96,10 +115,12 @@ class LLMGateway:
             try:
                 with open(config_file, "r", encoding="utf-8") as f:
                     saved = json.load(f)
-                    # 深合并
+                    # 问题 7 修复：用深合并替代 dict.update()
                     for key in ["remote", "local"]:
                         if key in saved and key in default_config:
-                            default_config[key].update(saved[key])
+                            default_config[key] = _deep_merge(
+                                default_config[key], saved[key]
+                            )
             except Exception as e:
                 logger.warning("加载 LLM 配置文件失败: %s", e)
 
@@ -107,11 +128,10 @@ class LLMGateway:
 
     def _init_clients(self) -> None:
         """初始化各提供商的 OpenAI 兼容客户端"""
-        # 从配置文件读取（优先级更高）
-        config = self._load_config_from_file()
+        self._config = self._load_config_from_file()
 
         # 远程 API
-        remote = config.get("remote", {})
+        remote = self._config.get("remote", {})
         if remote.get("enabled") and remote.get("apiKey"):
             provider = remote.get("provider", "deepseek")
             base_url = remote.get("baseUrl", "https://api.deepseek.com/v1")
@@ -123,7 +143,7 @@ class LLMGateway:
             logger.info("LLM 远程提供商已初始化: %s (base_url=%s)", provider, base_url)
 
         # 本地 Ollama
-        local = config.get("local", {})
+        local = self._config.get("local", {})
         if local.get("enabled"):
             endpoint = local.get("endpoint", settings.OLLAMA_ENDPOINT)
             self._clients["ollama"] = AsyncOpenAI(
@@ -158,21 +178,57 @@ class LLMGateway:
                 )
                 logger.info("LLM 本地模型已初始化: ollama (默认配置)")
 
-        self._config_loaded = True
-
     def reload_config(self) -> None:
         """重新加载配置（配置更新后调用）"""
         self._clients.clear()
         self._init_clients()
+        logger.info("LLM 网关配置已重新加载，可用提供商: %s", list(self._clients.keys()))
+
+    # ── 模型选择（问题 2 修复：优先从配置文件读取模型名） ──
 
     def _get_model(self, provider: str, task: str) -> str:
-        """获取指定提供商+任务对应的模型名"""
-        task_map = TASK_MODEL_MAP.get(provider, {})
-        return task_map.get(task, "deepseek-chat")
+        """
+        获取指定提供商+任务对应的模型名。
+
+        优先级：配置文件 models 字段 > 硬编码 TASK_MODEL_FALLBACK
+        """
+        # 1. 从配置文件读取
+        config_key = _TASK_TO_CONFIG_KEY.get(task, "analyze")
+
+        # 远程提供商
+        remote = self._config.get("remote", {})
+        if provider == remote.get("provider") and remote.get("models", {}).get(config_key):
+            return remote["models"][config_key]
+
+        # 本地 Ollama
+        local = self._config.get("local", {})
+        if provider == "ollama" and local.get("models", {}).get(config_key):
+            return local["models"][config_key]
+
+        # 2. fallback 到硬编码映射
+        fallback = _TASK_MODEL_FALLBACK.get(provider, {}).get(task, "deepseek-chat")
+        logger.debug("模型 fallback: provider=%s task=%s → %s", provider, task, fallback)
+        return fallback
 
     def _get_available_providers(self) -> list[str]:
-        """返回有 API Key 的提供商列表"""
-        return [p for p in PROVIDER_PRIORITY if p in self._clients]
+        """返回有 client 的提供商列表，配置文件中的排在前面"""
+        remote_provider = self._config.get("remote", {}).get("provider", "")
+        providers: list[str] = []
+
+        # 配置文件中启用的提供商优先
+        if remote_provider and remote_provider in self._clients:
+            providers.append(remote_provider)
+        if "ollama" in self._clients:
+            providers.append("ollama")
+
+        # 补充其他已初始化的提供商
+        for p in self._clients:
+            if p not in providers:
+                providers.append(p)
+
+        return providers
+
+    # ── LLM 调用 ──
 
     async def chat(
         self,

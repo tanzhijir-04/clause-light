@@ -94,38 +94,44 @@ const Components = (() => {
 
   function handleFileUpload(input) {
     const file = input.files[0];
-    if (file) {
-      // 显示 loading 状态
-      const uploadZone = document.getElementById('upload-zone');
-      const originalContent = uploadZone ? uploadZone.innerHTML : '';
-      if (uploadZone) {
-        uploadZone.innerHTML = `
-          <div class="spinner"></div>
-          <div class="upload-zone-title">正在分析合同...</div>
-          <div class="upload-zone-hint">OCR 识别 + AI 分析中，请稍候</div>
-        `;
-      }
+    if (!file) return;
 
-      API.contracts.analyze(file)
-        .then(res => {
-          if (res && res.success) {
-            toast('合同分析完成：' + file.name, 'success');
-            // 刷新页面
-            setTimeout(() => App.renderCurrentPage(), 1000);
-          } else {
-            toast('分析失败：' + (res?.detail || '未知错误'), 'error');
-            if (uploadZone) uploadZone.innerHTML = originalContent;
-          }
-        })
-        .catch(err => {
-          toast('上传失败：' + err.message, 'error');
-          if (uploadZone) uploadZone.innerHTML = originalContent;
-        })
-        .finally(() => {
-          // 清空 input 以便再次选择同一文件
-          input.value = '';
-        });
+    // 显示 loading 状态（同时支持仪表盘 upload-zone 和合同管理页）
+    const uploadZone = document.getElementById('upload-zone');
+    const originalContent = uploadZone ? uploadZone.innerHTML : '';
+    if (uploadZone) {
+      uploadZone.innerHTML = `
+        <div class="spinner"></div>
+        <div class="upload-zone-title">正在分析合同...</div>
+        <div class="upload-zone-hint">OCR 识别 + AI 分析中，预计 30~60 秒</div>
+      `;
     }
+
+    // 同时显示全局 toast
+    toast('正在分析：' + file.name + '，请稍候...', 'info', 5000);
+
+    API.contracts.analyze(file)
+      .then(res => {
+        if (res && res.success) {
+          toast('分析完成！正在跳转...', 'success', 2000);
+          // 跳转到合同详情页
+          setTimeout(() => {
+            Router.navigate('contracts/' + res.contractId);
+          }, 500);
+        } else {
+          // 问题 5 修复：后端返回 success:false + error
+          const errMsg = res?.error || res?.detail || '未知错误';
+          toast('分析失败：' + errMsg, 'error', 6000);
+          if (uploadZone) uploadZone.innerHTML = originalContent;
+        }
+      })
+      .catch(err => {
+        toast('上传失败：' + err.message, 'error', 6000);
+        if (uploadZone) uploadZone.innerHTML = originalContent;
+      })
+      .finally(() => {
+        input.value = '';
+      });
   }
 
   /** 侧边栏 */
