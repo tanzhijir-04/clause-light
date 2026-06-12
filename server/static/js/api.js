@@ -69,7 +69,7 @@ const MOCK_PENDING_RULES = [
 
 const API = (() => {
   // 是否使用 mock 数据（后端未就绪时为 true）
-  const USE_MOCK = true;
+  const USE_MOCK = false;
 
   /** 通用 fetch 封装 */
   async function _fetch(url, options = {}) {
