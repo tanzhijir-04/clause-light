@@ -243,12 +243,8 @@ def _save_llm_config(config: dict) -> None:
 
 @app.get("/api/settings/llm")
 async def get_llm_settings():
-    """获取 LLM 配置（apiKey 脱敏返回）"""
-    config = _load_llm_config()
-    # 脱敏：用占位符替换真实 key，前端不需要知道真实值
-    if config["remote"].get("apiKey"):
-        config["remote"]["apiKey"] = "***"
-    return config
+    """获取 LLM 配置（仅 localhost 访问，不脱敏）"""
+    return _load_llm_config()
 
 
 @app.put("/api/settings/llm")
@@ -259,18 +255,15 @@ async def update_llm_settings(request: Request):
     if "remote" not in data and "local" not in data:
         return {"success": False, "error": "无效的配置格式"}
 
-    # 加载现有配置（保留真实 apiKey）
     current_config = _load_llm_config()
 
-    # 更新 remote
     if "remote" in data:
         incoming = data["remote"]
-        # 如果前端传了占位符，保留原 apiKey；否则用新值
-        if incoming.get("apiKey") in ("***", "", None):
+        # 保留原 apiKey 的情况：前端传 "__KEEP__" 或显式未修改标记
+        if incoming.get("apiKey") == "__KEEP__":
             incoming["apiKey"] = current_config["remote"].get("apiKey", "")
         current_config["remote"] = _deep_merge(current_config["remote"], incoming)
 
-    # 更新 local
     if "local" in data:
         current_config["local"] = _deep_merge(current_config["local"], data["local"])
 
