@@ -236,6 +236,87 @@ class TestKnowledgeStats:
         assert stats["avgConfidence"] > 0
 
 
+class TestKnowledgeGetLaws:
+    """法规检索测试"""
+
+    async def test_get_laws_empty(self, db_session):
+        """测试空数据库法规检索"""
+        engine = KnowledgeEngine(db_session)
+        laws = await engine.get_laws()
+        assert laws == []
+
+    async def test_get_laws_single_law(self, db_session):
+        """测试单部法规检索"""
+        ref1 = LegalReference(
+            law_name="中华人民共和国民法典",
+            article_number="第四百九十六条",
+            content="格式条款是当事人为了重复使用而预先拟定...",
+            tags=json.dumps(["格式条款", "公平原则"], ensure_ascii=False),
+        )
+        ref2 = LegalReference(
+            law_name="中华人民共和国民法典",
+            article_number="第四百九十七条",
+            content="有下列情形之一的，该格式条款无效...",
+            tags=json.dumps(["格式条款无效"], ensure_ascii=False),
+        )
+        db_session.add_all([ref1, ref2])
+        await db_session.commit()
+
+        engine = KnowledgeEngine(db_session)
+        laws = await engine.get_laws()
+        assert len(laws) == 1
+        assert laws[0]["name"] == "中华人民共和国民法典"
+        assert laws[0]["articles"] == 2
+        assert "格式条款" in laws[0]["tags"]
+
+    async def test_get_laws_multiple_laws(self, db_session):
+        """测试多部法规检索"""
+        ref1 = LegalReference(
+            law_name="中华人民共和国民法典",
+            article_number="第四百六十九条",
+            content="当事人订立合同...",
+            tags=json.dumps(["合同形式"], ensure_ascii=False),
+        )
+        ref2 = LegalReference(
+            law_name="中华人民共和国劳动合同法",
+            article_number="第十条",
+            content="建立劳动关系，应当订立书面劳动合同...",
+            tags=json.dumps(["书面合同"], ensure_ascii=False),
+        )
+        db_session.add_all([ref1, ref2])
+        await db_session.commit()
+
+        engine = KnowledgeEngine(db_session)
+        laws = await engine.get_laws()
+        assert len(laws) == 2
+        names = {law["name"] for law in laws}
+        assert "中华人民共和国民法典" in names
+        assert "中华人民共和国劳动合同法" in names
+
+    async def test_get_laws_tag_aggregation(self, db_session):
+        """测试法规标签聚合"""
+        ref1 = LegalReference(
+            law_name="中华人民共和国民法典",
+            article_number="第四百九十六条",
+            content="格式条款...",
+            tags=json.dumps(["格式条款", "公平原则"], ensure_ascii=False),
+        )
+        ref2 = LegalReference(
+            law_name="中华人民共和国民法典",
+            article_number="第四百九十七条",
+            content="格式条款无效...",
+            tags=json.dumps(["格式条款", "无效情形"], ensure_ascii=False),
+        )
+        db_session.add_all([ref1, ref2])
+        await db_session.commit()
+
+        engine = KnowledgeEngine(db_session)
+        laws = await engine.get_laws()
+        assert len(laws) == 1
+        # 标签应该合并去重
+        assert set(laws[0]["tags"]) == {"格式条款", "公平原则", "无效情形"}
+
+
 class TestKnowledgeApproveReject:
     """知识库审核测试"""
 

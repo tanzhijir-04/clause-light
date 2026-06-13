@@ -180,6 +180,8 @@ class TestAnalyzeContract:
             }
         ]
 
+        mock_result.ocr_text = "合同原文内容"
+        mock_result.error = ""
         with patch("server.api.contracts.ContractAgent") as MockAgent:
             MockAgent.return_value.analyze = AsyncMock(return_value=mock_result)
 

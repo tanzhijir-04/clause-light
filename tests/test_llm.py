@@ -91,23 +91,33 @@ class TestLLMGatewayInit:
 
     def test_no_clients_without_keys(self):
         """测试无 API Key 时不创建客户端"""
+        empty_config = {
+            "remote": {"enabled": False, "provider": "deepseek", "baseUrl": "", "apiKey": "", "models": {}},
+            "local": {"enabled": False, "endpoint": "", "models": {}},
+        }
         with patch("server.core.llm.settings") as mock_settings:
             mock_settings.LLM_DEEPSEEK_API_KEY = ""
             mock_settings.LLM_OPENAI_API_KEY = ""
             mock_settings.LLM_QWEN_API_KEY = ""
             mock_settings.OLLAMA_ENDPOINT = ""
-            gateway = LLMGateway()
-            assert len(gateway._clients) == 0
+            with patch.object(LLMGateway, "_load_config_from_file", return_value=empty_config):
+                gateway = LLMGateway()
+                assert len(gateway._clients) == 0
 
     def test_ollama_client_always_created(self):
         """测试 Ollama 客户端始终创建"""
+        ollama_config = {
+            "remote": {"enabled": False, "provider": "deepseek", "baseUrl": "", "apiKey": "", "models": {}},
+            "local": {"enabled": True, "endpoint": "http://localhost:11434", "models": {}},
+        }
         with patch("server.core.llm.settings") as mock_settings:
             mock_settings.LLM_DEEPSEEK_API_KEY = ""
             mock_settings.LLM_OPENAI_API_KEY = ""
             mock_settings.LLM_QWEN_API_KEY = ""
             mock_settings.OLLAMA_ENDPOINT = "http://localhost:11434"
-            gateway = LLMGateway()
-            assert "ollama" in gateway._clients
+            with patch.object(LLMGateway, "_load_config_from_file", return_value=ollama_config):
+                gateway = LLMGateway()
+                assert "ollama" in gateway._clients
 
 
 class TestLLMGatewayChat:
