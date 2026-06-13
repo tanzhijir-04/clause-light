@@ -350,8 +350,8 @@ static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(static_dir):
     app.mount("/admin", StaticFiles(directory=static_dir, html=True), name="admin")
 
-# 手机端 PWA
-mobile_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "mobile")
+# 手机端 PWA（designs/clause-light-mobile/ 是可用的 PWA 原型）
+mobile_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "designs", "clause-light-mobile")
 if os.path.isdir(mobile_dir):
     app.mount("/mobile", StaticFiles(directory=mobile_dir, html=True), name="mobile")
 
