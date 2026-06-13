@@ -76,6 +76,16 @@ server/static/
 - 上传区域支持拖放高亮
 - 数据从 `/api/contracts` 和 `/api/knowledge/stats` 获取
 
+### 1.5 合同详情（contractDetail）
+
+合同详情页需支持两种视图切换（Tab）：
+
+**Tab 1 — 条款列表**：现有卡片列表（红黄绿标签，点击展开详情）
+
+**Tab 2 — 原文标注**：完整合同原文 + 高亮标注 + 右侧批注面板
+
+详细实现规格见 `docs/PROMPT-CONTRACT-ANNOTATED-VIEW.md`。
+
 ### 2. 合同管理（contracts）
 
 **布局：**

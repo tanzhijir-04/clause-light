@@ -47,7 +47,7 @@
    - prompt 是否在 prompts/ 目录？
    - 数据库操作是否用了 ORM？
 4. **测试**：编写简单的单元测试或集成测试
-5. **提交**：git commit，commit message 使用中文
+5. **提交**：每次对代码进行改动后，要推送GitHub并写详细的 commit，git commit，commit message 使用中文
 
 ### 不允许做的事情：
 

@@ -107,6 +107,83 @@ class TestKnowledgeSearch:
         results = await engine.search("违约金", "租赁合同")
         assert len(results) > 0
 
+    async def test_search_no_match(self, db_session):
+        """测试无匹配规则"""
+        rule = KnowledgeRule(
+            id="rule_no_match",
+            category="租赁",
+            rule_text="租赁合同规则",
+            confidence=0.7,
+            is_active=True,
+        )
+        db_session.add(rule)
+        await db_session.commit()
+
+        engine = KnowledgeEngine(db_session)
+        results = await engine.search("完全不相关的查询", "劳动")
+        assert len(results) == 0
+
+    async def test_search_top_k_limit(self, db_session):
+        """测试 top_k 限制"""
+        rules = [
+            KnowledgeRule(
+                id=f"rule_{i}",
+                category="通用",
+                rule_text=f"通用规则 {i}",
+                confidence=0.5 + i * 0.05,
+                is_active=True,
+            )
+            for i in range(10)
+        ]
+        db_session.add_all(rules)
+        await db_session.commit()
+
+        engine = KnowledgeEngine(db_session)
+        results = await engine.search("规则", "其他", top_k=3)
+        assert len(results) <= 3
+
+    async def test_search_usage_count_increment(self, db_session):
+        """测试搜索后使用次数递增"""
+        rule = KnowledgeRule(
+            id="rule_usage",
+            category="租赁",
+            rule_text="测试使用次数",
+            usage_count=0,
+            is_active=True,
+        )
+        db_session.add(rule)
+        await db_session.commit()
+
+        engine = KnowledgeEngine(db_session)
+        await engine.search("测试使用次数", "租赁合同")
+
+        stmt = select(KnowledgeRule).where(KnowledgeRule.id == "rule_usage")
+        result = await db_session.execute(stmt)
+        updated = result.scalar_one_or_none()
+        assert updated.usage_count == 1
+
+    async def test_search_general_always_included(self, db_session):
+        """测试通用规则始终包含"""
+        rule_general = KnowledgeRule(
+            id="rule_gen",
+            category="通用",
+            rule_text="通用规则",
+            is_active=True,
+        )
+        rule_labor = KnowledgeRule(
+            id="rule_labor2",
+            category="劳动",
+            rule_text="劳动规则",
+            is_active=True,
+        )
+        db_session.add_all([rule_general, rule_labor])
+        await db_session.commit()
+
+        engine = KnowledgeEngine(db_session)
+        results = await engine.search("规则", "租赁合同")  # 非劳动类型
+        assert any("通用规则" in r for r in results)
+        assert not any("劳动规则" in r for r in results)
+
 
 class TestKnowledgeAddRule:
     """知识库新增规则测试"""
@@ -315,6 +392,51 @@ class TestKnowledgeGetLaws:
         assert len(laws) == 1
         # 标签应该合并去重
         assert set(laws[0]["tags"]) == {"格式条款", "公平原则", "无效情形"}
+
+    async def test_get_laws_invalid_json_tags(self, db_session):
+        """测试法规标签 JSON 无效时的容错"""
+        ref = LegalReference(
+            law_name="测试法规",
+            article_number="第一条",
+            content="测试内容",
+            tags="invalid json",  # 无效 JSON
+        )
+        db_session.add(ref)
+        await db_session.commit()
+
+        engine = KnowledgeEngine(db_session)
+        laws = await engine.get_laws()
+        assert len(laws) == 1
+        assert laws[0]["tags"] == []  # 无效标签应返回空列表
+
+    async def test_get_laws_null_tags(self, db_session):
+        """测试法规标签为 None 时的容错"""
+        ref = LegalReference(
+            law_name="测试法规",
+            article_number="第一条",
+            content="测试内容",
+            tags=None,
+        )
+        db_session.add(ref)
+        await db_session.commit()
+
+        engine = KnowledgeEngine(db_session)
+        laws = await engine.get_laws()
+        assert len(laws) == 1
+        assert laws[0]["tags"] == []
+
+    async def test_get_laws_sorted_by_name(self, db_session):
+        """测试法规按名称排序"""
+        ref1 = LegalReference(law_name="劳动合同法", article_number="第一条", content="内容1")
+        ref2 = LegalReference(law_name="民法典", article_number="第一条", content="内容2")
+        ref3 = LegalReference(law_name="广告法", article_number="第一条", content="内容3")
+        db_session.add_all([ref1, ref2, ref3])
+        await db_session.commit()
+
+        engine = KnowledgeEngine(db_session)
+        laws = await engine.get_laws()
+        names = [law["name"] for law in laws]
+        assert names == sorted(names)  # 应按名称排序
 
 
 class TestKnowledgeApproveReject:

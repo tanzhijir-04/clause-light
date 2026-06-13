@@ -1,0 +1,306 @@
+import json, os
+
+path = r'C:\Users\20300\Desktop\clause-light\designs\contract-annotated-view\annotated-view.html'
+
+# Build the contract data as a JS object string
+contract_js = json.dumps({
+    "id": 1,
+    "title": "房屋租赁合同",
+    "type": "租赁合同",
+    "score": 35,
+    "riskLevel": "red",
+    "model": "deepseek-v3",
+    "createdAt": "2026-06-12",
+    "redCount": 3,
+    "yellowCount": 2,
+    "greenCount": 4
+}, ensure_ascii=False)
+
+clauses_js = json.dumps([
+    {"id":1,"clauseNumber":"第一条","clauseTitle":"房屋基本情况","clauseContent":"甲方将其拥有完全产权的位于北京市朝阳区建国路 88 号 2 号楼 1502 室的房屋（建筑面积 89 平方米）出租给乙方使用。该房屋用途为住宅，乙方应按约定用途使用房屋，不得擅自改变用途。","riskLevel":"green","riskSummary":"条款描述清晰，无明显风险","plainExplanation":"这条说的是房子的基本信息，甲方有完全产权，房子用来住的，不能随便改用途。没有问题。","legalBasis":"","suggestedClause":"","severityScore":1},
+    {"id":2,"clauseNumber":"第二条","clauseTitle":"租赁期限","clauseContent":"租赁期限自 2026 年 7 月 1 日起至 2027 年 6 月 30 日止，共计 12 个月。租赁期满，甲方有权收回房屋，乙方应如期交还。乙方如需续租，应在租赁期满前 30 日书面通知甲方。","riskLevel":"green","riskSummary":"期限明确，续租通知期合理","plainExplanation":"租期一年，到期后甲方可以收回房子。想续租要提前30天说。正常条款。","legalBasis":"","suggestedClause":"","severityScore":1},
+    {"id":3,"clauseNumber":"第三条","clauseTitle":"租金及支付方式","clauseContent":"1. 月租金为人民币 8,500 元整（大写：捌仟伍佰元整），按月支付，乙方应于每月 1 日前支付当月租金。\n2. 逾期支付的，每逾期一日，乙方应按月租金的 5% 向甲方支付滞纳金。\n3. 甲方有权在提前 3 日通知乙方的情况下单方面调整租金，调整幅度不受限制。\n4. 租金支付方式为银行转账，甲方指定账户信息由甲方另行通知。","riskLevel":"red","riskSummary":"逾期滞纳金每日5%（年化1825%）远超法律保护上限；甲方单方面调租无上限，严重不对等","plainExplanation":"如果你晚交一天房租，就要多交月租金的5%作为罚款，算下来年化利率高达1825%。更离谱的是，房东可以只提前3天通知就涨价，涨多少都行，你完全没有议价权。","legalBasis":"民法典第585条 — 约定的违约金过分高于造成的损失的，人民法院或者仲裁机构可以根据当事人的请求予以适当减少。","suggestedClause":"2. 逾期支付的，每逾期一日，乙方应按月租金的 0.05% 向甲方支付滞纳金。\n3. 租金调整需双方书面同意，年涨幅不超过 5%，且调整通知期不少于 60 日。","severityScore":9},
+    {"id":4,"clauseNumber":"第四条","clauseTitle":"押金","clauseContent":"1. 乙方应于本合同签订之日起 3 日内向甲方支付押金人民币 17,000 元整（大写：壹万柒仟元整），相当于两个月租金。\n2. 租赁期满或合同解除后，甲方应在乙方交还房屋并结清各项费用后 15 个工作日内退还押金。\n3. 如乙方存在拖欠租金、损坏房屋设施等违约行为，甲方有权从押金中扣除相应金额。","riskLevel":"yellow","riskSummary":"押金退还条件中"各项费用"表述模糊，扣除标准不明确","plainExplanation":"押金两个月租金，正常水平。但退押金时说要"结清各项费用"，到底包括哪些费用没写清楚，可能被找借口扣钱。","legalBasis":"民法典第714条 — 承租人应当妥善保管租赁物，因保管不善造成租赁物毁损、灭失的，应当承担赔偿责任。","suggestedClause":"2. 租赁期满或合同解除后，甲方应在乙方交还房屋后 15 个工作日内退还押金，扣除项目限于：拖欠租金、经双方确认的实际损坏赔偿。","severityScore":5},
+    {"id":5,"clauseNumber":"第五条","clauseTitle":"房屋维修与保养","clauseContent":"1. 甲方负责房屋主体结构及公共设施的维修。\n2. 乙方应合理使用并妥善保管房屋及附属设施，因乙方使用不当造成的损坏由乙方承担维修费用。\n3. 房屋及设施出现非乙方原因的损坏，乙方应及时通知甲方，甲方应在接到通知后 7 日内进行维修。","riskLevel":"green","riskSummary":"维修责任划分合理","plainExplanation":"房子大毛病房东修，你自己弄坏的自己修。没问题。","legalBasis":"","suggestedClause":"","severityScore":1},
+    {"id":6,"clauseNumber":"第六条","clauseTitle":"合同解除","clauseContent":"1. 经甲乙双方协商一致，可以解除本合同。\n2. 乙方有下列情形之一的，甲方有权单方解除合同并要求乙方赔偿损失：（1）拖欠租金超过 15 日的；（2）擅自改变房屋用途的；（3）利用房屋进行违法活动的。\n3. 甲方提前解除合同的，应提前 30 日书面通知乙方，并退还剩余租金及押金。","riskLevel":"yellow","riskSummary":"甲方单方解除权触发条件偏短，且缺少甲方违约时乙方的对应解除权","plainExplanation":"你拖欠房租超过15天，房东就能赶你走。但反过来，如果房东违约，合同里没写你有权提前走人，不公平。","legalBasis":"民法典第563条 — 当事人一方迟延履行主要债务，经催告后在合理期限内仍未履行的，对方可以解除合同。","suggestedClause":"2. 增加乙方解除权：甲方未按约定维修导致房屋无法正常居住超过 30 日的，乙方有权解除合同并要求退还全部押金。","severityScore":5},
+    {"id":7,"clauseNumber":"第七条","clauseTitle":"违约责任","clauseContent":"1. 任何一方违反本合同约定，应向守约方支付违约金人民币 10,000 元。\n2. 违约金不足以弥补损失的，违约方还应赔偿守约方的实际损失。\n3. 因不可抗力导致合同无法履行的，双方均不承担违约责任。","riskLevel":"red","riskSummary":"固定违约金10,000元可能过高，且未区分违约类型，对轻微违约也适用相同金额不合理","plainExplanation":"不管什么情况违约都要赔1万块。如果你只迟交了1天钥匙，也要赔1万，这明显不合理。","legalBasis":"民法典第585条 — 违约金应当与违约行为可能造成的损失相当，过高或过低的，当事人可以请求法院或仲裁机构予以调整。","suggestedClause":"1. 违约金根据违约类型确定：迟延交房/退房按日租金的 200% 计算；其他违约行为按月租金的 50% 计算，但不低于 2,000 元。","severityScore":8},
+    {"id":8,"clauseNumber":"第八条","clauseTitle":"争议解决","clauseContent":"因本合同引起的或与本合同有关的任何争议，双方应友好协商解决；协商不成的，任何一方均可向房屋所在地人民法院提起诉讼。","riskLevel":"green","riskSummary":"约定法院诉讼，标准条款","plainExplanation":"有问题先协商，协商不了去法院告。正常条款。","legalBasis":"","suggestedClause":"","severityScore":1},
+    {"id":9,"clauseNumber":"第九条","clauseTitle":"其他约定","clauseContent":"1. 本合同一式两份，甲乙双方各执一份，具有同等法律效力。\n2. 本合同自双方签字（盖章）之日起生效。\n3. 未尽事宜由双方另行协商，签订补充协议。","riskLevel":"green","riskSummary":"标准附则条款","plainExplanation":"合同一式两份，签字生效，没问题。","legalBasis":"","suggestedClause":"","severityScore":1}
+], ensure_ascii=False)
+
+full_text = """房 屋 租 赁 合 同
+
+合同编号：HT-2026-06120001
+签订日期：2026 年 6 月 12 日
+
+出租方（甲方）：张伟
+承租方（乙方）：李明
+
+第一条 房屋基本情况
+甲方将其拥有完全产权的位于北京市朝阳区建国路 88 号 2 号楼 1502 室的房屋（建筑面积 89 平方米）出租给乙方使用。该房屋用途为住宅，乙方应按约定用途使用房屋，不得擅自改变用途。
+
+第二条 租赁期限
+租赁期限自 2026 年 7 月 1 日起至 2027 年 6 月 30 日止，共计 12 个月。租赁期满，甲方有权收回房屋，乙方应如期交还。乙方如需续租，应在租赁期满前 30 日书面通知甲方。
+
+第三条 租金及支付方式
+1. 月租金为人民币 8,500 元整（大写：捌仟伍佰元整），按月支付，乙方应于每月 1 日前支付当月租金。
+2. 逾期支付的，每逾期一日，乙方应按月租金的 5% 向甲方支付滞纳金。
+3. 甲方有权在提前 3 日通知乙方的情况下单方面调整租金，调整幅度不受限制。
+4. 租金支付方式为银行转账，甲方指定账户信息由甲方另行通知。
+
+第四条 押金
+1. 乙方应于本合同签订之日起 3 日内向甲方支付押金人民币 17,000 元整（大写：壹万柒仟元整），相当于两个月租金。
+2. 租赁期满或合同解除后，甲方应在乙方交还房屋并结清各项费用后 15 个工作日内退还押金。
+3. 如乙方存在拖欠租金、损坏房屋设施等违约行为，甲方有权从押金中扣除相应金额。
+
+第五条 房屋维修与保养
+1. 甲方负责房屋主体结构及公共设施的维修。
+2. 乙方应合理使用并妥善保管房屋及附属设施，因乙方使用不当造成的损坏由乙方承担维修费用。
+3. 房屋及设施出现非乙方原因的损坏，乙方应及时通知甲方，甲方应在接到通知后 7 日内进行维修。
+
+第六条 合同解除
+1. 经甲乙双方协商一致，可以解除本合同。
+2. 乙方有下列情形之一的，甲方有权单方解除合同并要求乙方赔偿损失：（1）拖欠租金超过 15 日的；（2）擅自改变房屋用途的；（3）利用房屋进行违法活动的。
+3. 甲方提前解除合同的，应提前 30 日书面通知乙方，并退还剩余租金及押金。
+
+第七条 违约责任
+1. 任何一方违反本合同约定，应向守约方支付违约金人民币 10,000 元。
+2. 违约金不足以弥补损失的，违约方还应赔偿守约方的实际损失。
+3. 因不可抗力导致合同无法履行的，双方均不承担违约责任。
+
+第八条 争议解决
+因本合同引起的或与本合同有关的任何争议，双方应友好协商解决；协商不成的，任何一方均可向房屋所在地人民法院提起诉讼。
+
+第九条 其他约定
+1. 本合同一式两份，甲乙双方各执一份，具有同等法律效力。
+2. 本合同自双方签字（盖章）之日起生效。
+3. 未尽事宜由双方另行协商，签订补充协议。
+
+甲方（签字）：张伟          乙方（签字）：李明
+日期：2026 年 6 月 12 日     日期：2026 年 6 月 12 日"""
+
+# Write CSS + HTML template
+with open(path, 'w', encoding='utf-8') as f:
+    f.write('''<!DOCTYPE html>
+<html lang="zh" data-variant="v1" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>\u5408\u540c\u539f\u6587\u6807\u6ce8\u89c6\u56fe</title>
+<style>
+:root,[data-theme="light"]{--bg-app:#fff;--bg-sidebar:#f7f7f5;--bg-surface:#fff;--bg-surface-hover:#f7f7f5;--bg-muted:#f1f1ef;--text-primary:#1a1a1a;--text-secondary:#6b6b6b;--text-tertiary:#9b9b9b;--border-default:#e8e8e5;--border-strong:#d4d4d0;--border-subtle:#f0f0ee;--accent:#2383e2;--accent-hover:#1b6ec2;--accent-subtle:#e8f0fe;--risk-red:#e53e3e;--risk-red-bg:#fff5f5;--risk-red-text:#c53030;--risk-red-border:#fed7d7;--risk-yellow:#d69e2e;--risk-yellow-bg:#fffff0;--risk-yellow-text:#b7791f;--risk-yellow-border:#fefcbf;--risk-green:#38a169;--risk-green-bg:#f0fff4;--risk-green-text:#276749;--risk-green-border:#c6f6d5;--shadow-sm:0 1px 3px rgba(0,0,0,.06);--shadow-lg:0 10px 15px rgba(0,0,0,.06);--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:20px;--sp-6:24px;--sp-8:32px;--radius-sm:4px;--radius-md:6px;--radius-lg:8px;--radius-full:9999px;--font-sans:Inter,-apple-system,SF Pro Text,PingFang SC,Noto Sans SC,system-ui,sans-serif;--text-xs:11px;--text-sm:13px;--text-base:14px;--text-md:15px;--text-lg:18px;--text-xl:24px;--text-2xl:30px}
+[data-theme="dark"]{--bg-app:#191919;--bg-sidebar:#202020;--bg-surface:#232323;--bg-surface-hover:#2a2a2a;--bg-muted:#2a2a2a;--text-primary:#ebebeb;--text-secondary:#999;--text-tertiary:#666;--border-default:#333;--border-strong:#444;--border-subtle:#2a2a2a;--accent:#529cca;--accent-hover:#6db3e0;--accent-subtle:#1a2a35;--risk-red:#fc8181;--risk-red-bg:#2d1b1b;--risk-red-text:#feb2b2;--risk-red-border:#5c3030;--risk-yellow:#f6e05e;--risk-yellow-bg:#2d2b1b;--risk-yellow-text:#faf089;--risk-yellow-border:#5c5530;--risk-green:#68d391;--risk-green-bg:#1b2d1f;--risk-green-text:#9ae6b4;--risk-green-border:#305c3a;--shadow-sm:0 1px 3px rgba(0,0,0,.3);--shadow-lg:0 10px 15px rgba(0,0,0,.4)}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{font-family:var(--font-sans);font-size:var(--text-base);line-height:1.6;color:var(--text-primary);background:var(--bg-app);-webkit-font-smoothing:antialiased}
+::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:3px}
+button{font-family:inherit;border:none;background:none;cursor:pointer;color:inherit;outline:none}
+.app{display:flex;height:100vh;overflow:hidden}
+.sidebar{width:240px;min-width:240px;height:100vh;display:flex;flex-direction:column;background:var(--bg-sidebar);border-right:1px solid var(--border-default);flex-shrink:0}
+.sidebar-header{display:flex;align-items:center;gap:12px;padding:20px}
+.sidebar-logo{width:32px;height:32px;border-radius:6px;background:linear-gradient(135deg,#38a169,#2383e2);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff}
+.sidebar-title{font-size:15px;font-weight:600}
+.sidebar-nav{flex:1;padding:0 8px}
+.sidebar-nav-item{display:flex;align-items:center;gap:12px;padding:8px 12px;border-radius:6px;color:var(--text-secondary);font-size:13px;font-weight:500;cursor:pointer;transition:all .15s}
+.sidebar-nav-item:hover{background:rgba(0,0,0,.04);color:var(--text-primary)}
+.sidebar-nav-item.active{background:rgba(35,131,226,.08);color:var(--text-primary)}
+.sidebar-section-label{padding:8px 12px;font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.04em}
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.topbar{padding:20px 24px 12px;flex-shrink:0;border-bottom:1px solid var(--border-subtle)}
+.topbar-row{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.topbar-title{font-size:24px;font-weight:700;letter-spacing:-.03em}
+.topbar-subtitle{font-size:13px;color:var(--text-secondary);margin-top:2px}
+.view-tabs{display:flex;gap:0;border-bottom:1px solid var(--border-default);margin-top:16px}
+.view-tab{padding:12px 16px;font-size:13px;font-weight:500;color:var(--text-secondary);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;margin-bottom:-1px;user-select:none;display:flex;align-items:center;gap:8px}
+.view-tab:hover{color:var(--text-primary)}.view-tab.active{color:var(--text-primary);border-bottom-color:var(--accent)}
+.risk-dist{display:flex;height:6px;border-radius:3px;overflow:hidden;gap:2px;cursor:pointer}
+.risk-dist-seg{height:100%;border-radius:3px;transition:opacity .15s}
+.risk-dist-seg.red{background:var(--risk-red)}.risk-dist-seg.yellow{background:var(--risk-yellow)}.risk-dist-seg.green{background:var(--risk-green)}
+.risk-dist-seg:hover{opacity:.8}.risk-dist-seg.dim{opacity:.3}
+.risk-nav{display:flex;align-items:center;gap:8px}
+.risk-nav-btn{display:flex;align-items:center;gap:4px;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:500;border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-secondary);transition:all .15s}
+.risk-nav-btn:hover:not(:disabled){background:var(--bg-surface-hover);color:var(--text-primary);border-color:var(--border-strong)}
+.risk-nav-btn:disabled{opacity:.4;cursor:not-allowed}
+.risk-nav-count{font-size:11px;color:var(--text-tertiary);min-width:60px;text-align:center}
+.content-area{flex:1;display:flex;overflow:hidden;position:relative}
+.original-text{flex:1;overflow-y:auto;padding:24px 32px;font-size:15px;line-height:1.9;scroll-behavior:smooth;white-space:pre-wrap}
+.clause-mark{position:relative;cursor:pointer;transition:all .15s;border-left:3px solid transparent;padding-left:12px;margin-left:-3px;border-radius:0 4px 4px 0;display:inline}
+.clause-mark.red{background:rgba(229,62,62,.12);border-left-color:var(--risk-red)}
+.clause-mark.yellow{background:rgba(214,158,46,.10);border-left-color:var(--risk-yellow)}
+.clause-mark:hover{filter:brightness(.95)}
+.clause-mark.active{box-shadow:0 0 0 2px var(--accent);z-index:1;position:relative}
+.clause-mark .clause-label{position:absolute;top:-10px;right:8px;font-size:10px;font-weight:600;padding:1px 6px;border-radius:9999px;opacity:0;transition:opacity .15s;pointer-events:none}
+.clause-mark:hover .clause-label,.clause-mark.active .clause-label{opacity:1}
+.clause-mark.red .clause-label{background:var(--risk-red);color:#fff}
+.clause-mark.yellow .clause-label{background:var(--risk-yellow);color:#fff}
+.annotation-panel{width:400px;min-width:400px;border-left:1px solid var(--border-default);background:var(--bg-surface);display:flex;flex-direction:column;overflow:hidden;transition:width .25s ease,min-width .25s ease,opacity .2s ease}
+.annotation-panel.collapsed{width:0;min-width:0;opacity:0;border-left:none}
+.anno-header{padding:16px 20px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;gap:8px}
+.anno-close{width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px;color:var(--text-tertiary);transition:all .15s;font-size:16px}
+.anno-close:hover{background:var(--bg-surface-hover);color:var(--text-primary)}
+.anno-risk-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:9999px;font-size:11px;font-weight:600}
+.anno-risk-badge.red{background:var(--risk-red-bg);color:var(--risk-red-text);border:1px solid var(--risk-red-border)}
+.anno-risk-badge.yellow{background:var(--risk-yellow-bg);color:var(--risk-yellow-text);border:1px solid var(--risk-yellow-border)}
+.anno-risk-badge.green{background:var(--risk-green-bg);color:var(--risk-green-text);border:1px solid var(--risk-green-border)}
+.anno-body{flex:1;overflow-y:auto;padding:20px}
+.anno-section{margin-bottom:20px}
+.anno-section-title{font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px}
+.anno-section-content{font-size:13px;line-height:1.7;color:var(--text-primary);white-space:pre-wrap}
+.anno-section-content.legal{color:var(--text-secondary);font-style:italic}
+.anno-section-content.suggest{color:var(--accent);background:var(--accent-subtle);padding:12px;border-radius:6px;border-left:3px solid var(--accent)}
+.severity-bar{display:flex;align-items:center;gap:8px;margin-top:8px}
+.severity-blocks{display:flex;gap:2px}
+.severity-block{width:16px;height:8px;border-radius:2px;background:var(--border-default)}
+.severity-text{font-size:11px;color:var(--text-tertiary);margin-left:8px}
+.clause-list-view{flex:1;overflow-y:auto;padding:24px 32px}
+.clause-card{border-left:3px solid var(--border-default);padding:16px 20px;margin-bottom:12px;background:var(--bg-surface);border-radius:0 6px 6px 0;border-top:1px solid var(--border-subtle);border-right:1px solid var(--border-subtle);border-bottom:1px solid var(--border-subtle);cursor:pointer;transition:all .15s}
+.clause-card:hover{background:var(--bg-surface-hover);box-shadow:var(--shadow-sm)}
+.clause-card.red{border-left-color:var(--risk-red)}.clause-card.yellow{border-left-color:var(--risk-yellow)}.clause-card.green{border-left-color:var(--risk-green)}
+.clause-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.clause-card-num{font-weight:600;font-size:15px}
+.clause-card-title{font-size:13px;color:var(--text-secondary);margin-bottom:8px}
+.clause-card-summary{font-size:13px}
+@media(max-width:1024px){.sidebar{display:none}.annotation-panel{width:100%!important;min-width:100%!important;position:absolute;bottom:0;left:0;right:0;height:50%;border-left:none;border-top:1px solid var(--border-default);border-radius:8px 8px 0 0;z-index:10;box-shadow:var(--shadow-lg)}.annotation-panel.collapsed{height:0;width:100%!important;min-width:100%!important}.original-text{padding:16px}}
+@media(max-width:768px){.topbar{padding:12px 16px 8px}.topbar-title{font-size:18px}.annotation-panel{height:60%}.original-text{padding:12px;font-size:14px}}
+@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}.animate-in{animation:fadeIn .2s ease-out}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+<script type="text/babel">
+const{useState,useEffect,useRef,useCallback}=React;
+const FULLTEXT=''' + json.dumps(full_text, ensure_ascii=False) + ''';
+const CLAUSES=''' + clauses_js + ''';
+const C={id:1,title:"\\u623f\\u5c4b\\u79df\\u8d41\\u5408\\u540c",type:"\\u79df\\u8d41\\u5408\\u540c",score:35,riskLevel:"red",model:"deepseek-v3",createdAt:"2026-06-12",redCount:3,yellowCount:2,greenCount:4,fullText:FULLTEXT,clauses:CLAUSES};
+function rl(l){return l==='red'?'\\u9ad8\\u98ce\\u9669':l==='yellow'?'\\u4e2d\\u98ce\\u9669':'\\u4f4e\\u98ce\\u9669'}
+function Sidebar(){
+  const nav=[['dashboard','\\u4eea\\u8868\\u76d8'],['contracts','\\u5408\\u540c\\u7ba1\\u7406'],['knowledge','\\u77e5\\u8bc6\\u5e93'],['sync','\\u540c\\u6b65\\u7ba1\\u7406'],['settings','\\u8bbe\\u7f6e'],['models','\\u6a21\\u578b\\u7ba1\\u7406']];
+  return React.createElement('div',{className:'sidebar'},
+    React.createElement('div',{className:'sidebar-header'},React.createElement('div',{className:'sidebar-logo'},'CL'),React.createElement('div',{className:'sidebar-title'},'\\u5408\\u540c\\u7ea2\\u7eff\\u706f')),
+    React.createElement('div',{className:'sidebar-nav'},
+      React.createElement('div',{className:'sidebar-section-label'},'\\u5bfc\\u822a'),
+      ...nav.map(([id,label])=>React.createElement('div',{key:id,className:'sidebar-nav-item'+(id==='contracts'?' active':'')},React.createElement('span',{className:'nav-icon',style:{width:18,height:18}},id==='contracts'?'\\ud83d\\udcc4':id==='dashboard'?'\\ud83d\\udcca':id==='knowledge'?'\\ud83d\\udcda':id==='sync'?'\\ud83d\\udd04':id==='settings'?'\\u2699\\ufe0f':'\\ud83d\\udce6'),React.createElement('span',null,label)))
+    ),
+    React.createElement('div',{style:{padding:'16px 20px',borderTop:'1px solid var(--border-default)',fontSize:'11px',color:'var(--text-tertiary)',display:'flex',alignItems:'center',gap:8}},React.createElement('span',{style:{width:7,height:7,borderRadius:'50%',background:'var(--risk-green)'}}),'\\u670d\\u52a1\\u8fd0\\u884c\\u4e2d')
+  );
+}
+function RiskDist({red,yellow,green,filter,onFilter}){
+  const t=red+yellow+green;
+  return React.createElement('div',{style:{display:'flex',alignItems:'center',gap:'var(--sp-3)'}},
+    React.createElement('div',{className:'risk-dist',style:{flex:1}},
+      red>0&&React.createElement('div',{className:'risk-dist-seg red'+(filter&&filter!=='red'?' dim':''),style:{width:(red/t)*100+'%'},onClick:()=>onFilter(filter==='red'?null:'red')}),
+      yellow>0&&React.createElement('div',{className:'risk-dist-seg yellow'+(filter&&filter!=='yellow'?' dim':''),style:{width:(yellow/t)*100+'%'},onClick:()=>onFilter(filter==='yellow'?null:'yellow')}),
+      green>0&&React.createElement('div',{className:'risk-dist-seg green'+(filter&&filter!=='green'?' dim':''),style:{width:(green/t)*100+'%'},onClick:()=>onFilter(filter==='green'?null:'green')})
+    ),
+    React.createElement('div',{style:{display:'flex',gap:12,fontSize:'11px',color:'var(--text-secondary)',whiteSpace:'nowrap'}},
+      React.createElement('span',{style:{color:'var(--risk-red)',fontWeight:filter==='red'?700:400,cursor:'pointer'},onClick:()=>onFilter(filter==='red'?null:'red')},'\\u7ea2 '+red),
+      React.createElement('span',{style:{color:'var(--risk-yellow)',fontWeight:filter==='yellow'?700:400,cursor:'pointer'},onClick:()=>onFilter(filter==='yellow'?null:'yellow')},'\\u9ec4 '+yellow),
+      React.createElement('span',{style:{color:'var(--risk-green)',fontWeight:filter==='green'?700:400,cursor:'pointer'},onClick:()=>onFilter(filter==='green'?null:'green')},'\\u7eff '+green)
+    )
+  );
+}
+function AnnoPanel({clause,onClose}){
+  if(!clause)return React.createElement('div',{className:'annotation-panel collapsed'});
+  const sv=clause.severityScore||0;
+  const svc=sv>=7?'var(--risk-red)':sv>=4?'var(--risk-yellow)':'var(--risk-green)';
+  return React.createElement('div',{className:'annotation-panel',style:{animation:'slideUp .2s ease-out'}},
+    React.createElement('div',{className:'anno-header'},
+      React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8,minWidth:0}},
+        React.createElement('span',{className:'anno-risk-badge '+clause.riskLevel},clause.riskLevel==='red'?'\\ud83d\\udd34':clause.riskLevel==='yellow'?'\\ud83d\\udfe1':'\\ud83d\\udfe2',rl(clause.riskLevel)),
+        React.createElement('span',{style:{fontSize:'13px',fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},clause.clauseTitle)
+      ),
+      React.createElement('button',{className:'anno-close',onClick:onClose},'\\u2715')
+    ),
+    React.createElement('div',{className:'anno-body'},
+      clause.riskSummary&&React.createElement('div',{className:'anno-section'},React.createElement('div',{className:'anno-section-title'},'\\u95ee\\u9898\\u63cf\\u8ff0'),React.createElement('div',{className:'anno-section-content'},clause.riskSummary)),
+      clause.plainExplanation&&React.createElement('div',{className:'anno-section'},React.createElement('div',{className:'anno-section-title'},'\\u901a\\u4fd7\\u89e3\\u91ca'),React.createElement('div',{className:'anno-section-content'},clause.plainExplanation)),
+      clause.legalBasis&&React.createElement('div',{className:'anno-section'},React.createElement('div',{className:'anno-section-title'},'\\u6cd5\\u5f8b\\u4f9d\\u636e'),React.createElement('div',{className:'anno-section-content legal'},clause.legalBasis)),
+      clause.suggestedClause&&React.createElement('div',{className:'anno-section'},React.createElement('div',{className:'anno-section-title'},'\\u4fee\\u6539\\u5efa\\u8bae'),React.createElement('div',{className:'anno-section-content suggest'},clause.suggestedClause)),
+      React.createElement('div',{className:'anno-section'},React.createElement('div',{className:'anno-section-title'},'\\u4e25\\u91cd\\u5ea6'),
+        React.createElement('div',{className:'severity-bar'},
+          React.createElement('div',{className:'severity-blocks'},...Array.from({length:10}).map((_,i)=>React.createElement('div',{key:i,className:'severity-block',style:i<sv?{background:svc}:{}}))),
+          React.createElement('span',{className:'severity-text'},sv+'/10')
+        )
+      ),
+      clause.riskLevel!=='green'&&React.createElement('div',{className:'anno-section',style:{display:'flex',gap:8}},
+        React.createElement('button',{style:{padding:'4px 12px',borderRadius:'6px',fontSize:'11px',fontWeight:500,border:'1px solid var(--border-default)',background:'var(--bg-surface)',color:'var(--text-secondary)',cursor:'pointer'}},'\\u2713 \\u6807\\u6ce8\\u51c6\\u786e'),
+        React.createElement('button',{style:{padding:'4px 12px',borderRadius:'6px',fontSize:'11px',fontWeight:500,border:'1px solid var(--border-default)',background:'var(--bg-surface)',color:'var(--text-secondary)',cursor:'pointer'}},'\\u2717 \\u6807\\u6ce8\\u4e0d\\u51c6\\u786e')
+      )
+    )
+  );
+}
+function AnnotatedView({contract,onSelect,activeId}){
+  const ref=useRef(null);
+  useEffect(()=>{if(!ref.current)return;const el=ref.current.querySelector('.clause-mark.red');if(el)setTimeout(()=>el.scrollIntoView({behavior:'smooth',block:'center'}),300)},[]);
+  if(!contract)return null;
+  const text=contract.fullText;const clauses=contract.clauses||[];
+  let segs=[];
+  clauses.forEach(c=>{const ct=c.clauseContent;if(!ct)return;const parts=ct.split('\\n').filter(p=>p.trim().length>10);
+    for(const p of parts){const t=p.trim();const idx=text.indexOf(t);if(idx!==-1){const last=parts[parts.length-1].trim();const li=text.lastIndexOf(last);segs.push({start:idx,end:li!==-1?li+last.length:idx+t.length,clause:c});break}}});
+  segs.sort((a,b)=>a.start-b.start);
+  const els=[];let cur=0;
+  segs.forEach((s,i)=>{if(s.start>cur)els.push(React.createElement('span',{key:'t'+i},text.slice(cur,s.start)));
+    if(s.start>=cur){els.push(React.createElement('span',{key:'c'+i,className:'clause-mark '+s.clause.riskLevel+(activeId===s.clause.id?' active':''),onClick:()=>onSelect(s.clause)},React.createElement('span',{className:'clause-label'},s.clause.clauseNumber),text.slice(s.start,s.end)));cur=s.end}});
+  if(cur<text.length)els.push(React.createElement('span',{key:'tail'},text.slice(cur)));
+  return React.createElement('div',{className:'original-text',ref,lang:'zh'},...els);
+}
+function ListView({contract,onSelect}){
+  if(!contract)return null;
+  return React.createElement('div',{className:'clause-list-view animate-in'},
+    ...contract.clauses.map(c=>React.createElement('div',{key:c.id,className:'clause-card '+c.riskLevel,onClick:()=>onSelect(c)},
+      React.createElement('div',{className:'clause-card-header'},React.createElement('span',{className:'clause-card-num'},c.clauseNumber),React.createElement('span',{className:'anno-risk-badge '+c.riskLevel},rl(c.riskLevel))),
+      React.createElement('div',{className:'clause-card-title'},c.clauseTitle),
+      React.createElement('div',{className:'clause-card-summary'},c.riskSummary),
+      c.suggestedClause&&React.createElement('div',{style:{fontSize:'13px',color:'var(--accent)',background:'var(--accent-subtle)',padding:8,borderRadius:'6px',marginTop:8}},'\\u4fee\\u6539\\u5efa\\u8bae\\uff1a'+c.suggestedClause.slice(0,80)+'...'),
+      c.legalBasis&&React.createElement('div',{style:{fontSize:'11px',color:'var(--text-tertiary)',marginTop:8}},'\\u6cd5\\u5f8b\\u4f9d\\u636e\\uff1a'+c.legalBasis.slice(0,60)+'...')
+    ))
+  );
+}
+function App(){
+  const[view,setView]=useState('annotated');const[active,setActive]=useState(null);const[filter,setFilter]=useState(null);const[theme,setTheme]=useState('light');
+  const ct=C;const rc=ct.clauses.filter(c=>c.riskLevel==='red'||c.riskLevel==='yellow');const idx=active?rc.findIndex(c=>c.id===active.id):-1;
+  const sel=useCallback(c=>{setActive(c);setView('annotated')},[]);
+  const sc=ct.score>=70?'var(--risk-green)':ct.score>=50?'var(--risk-yellow)':'var(--risk-red)';
+  return React.createElement('div',{className:'app'},
+    React.createElement(Sidebar,null),
+    React.createElement('div',{className:'main'},
+      React.createElement('div',{className:'topbar'},
+        React.createElement('div',{className:'topbar-row'},
+          React.createElement('div',{style:{display:'flex',alignItems:'center',gap:12}},React.createElement('button',{style:{display:'flex',alignItems:'center',gap:4,padding:'4px 8px',borderRadius:'6px',fontSize:'13px',color:'var(--text-secondary)',cursor:'pointer'}},'\\u2190 \\u8fd4\\u56de')),
+          React.createElement('div',{style:{display:'flex',alignItems:'center',gap:12}},
+            React.createElement('div',{className:'risk-nav'},
+              React.createElement('button',{className:'risk-nav-btn',onClick:()=>{if(idx>0)setActive(rc[idx-1])},disabled:idx<=0},'\\u25b2 \\u4e0a\\u4e00\\u6761'),
+              React.createElement('span',{className:'risk-nav-count'},active?(idx+1)+' / '+rc.length:rc.length+' \\u6761\\u98ce\\u9669'),
+              React.createElement('button',{className:'risk-nav-btn',onClick:()=>{if(idx<rc.length-1)setActive(rc[idx+1])},disabled:idx>=rc.length-1},'\\u4e0b\\u4e00\\u6761 \\u25bc')
+            ),
+            React.createElement('button',{onClick:()=>{const n=theme==='light'?'dark':'light';setTheme(n);document.documentElement.setAttribute('data-theme',n)},style:{width:32,height:32,display:'flex',alignItems:'center',justifyContent:'center',borderRadius:'6px',border:'1px solid var(--border-default)',background:'var(--bg-surface)',color:'var(--text-secondary)',cursor:'pointer'}},theme==='light'?'\\ud83c\\udf19':'\\u2600\\ufe0f')
+          )
+        ),
+        React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-end',marginTop:8}},
+          React.createElement('div',null,React.createElement('div',{className:'topbar-title'},ct.title),React.createElement('div',{className:'topbar-subtitle'},ct.type+' \\u00b7 '+ct.createdAt)),
+          React.createElement('div',{style:{display:'flex',alignItems:'center',gap:16}},React.createElement('span',{className:'anno-risk-badge '+ct.riskLevel},rl(ct.riskLevel)),React.createElement('span',{style:{fontSize:'30px',fontWeight:700,color:sc,letterSpacing:'-.03em'}},ct.score))
+        ),
+        React.createElement('div',{style:{marginTop:12}},React.createElement(RiskDist,{red:ct.redCount,yellow:ct.yellowCount,green:ct.greenCount,filter,onFilter:setFilter})),
+        React.createElement('div',{className:'view-tabs'},
+          React.createElement('div',{className:'view-tab'+(view==='list'?' active':''),onClick:()=>setView('list')},'\\u2630 \\u6761\\u6b3e\\u5217\\u8868'),
+          React.createElement('div',{className:'view-tab'+(view==='annotated'?' active':''),onClick:()=>setView('annotated')},'\\ud83d\\udcdd \\u539f\\u6587\\u6807\\u6ce8')
+        )
+      ),
+      React.createElement('div',{className:'content-area'},
+        view==='annotated'
+          ?React.createElement(React.Fragment,null,React.createElement(AnnotatedView,{contract:ct,onSelect:sel,activeId:active?active.id:null}),React.createElement(AnnoPanel,{clause:active,onClose:()=>setActive(null)}))
+          :React.createElement(React.Fragment,null,React.createElement(ListView,{contract:ct,onSelect:sel}),React.createElement(AnnoPanel,{clause:active,onClose:()=>setActive(null)}))
+      )
+    )
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+</script>
+</body>
+</html>''')
+
+print(f'Written {os.path.getsize(path)} bytes to {path}')

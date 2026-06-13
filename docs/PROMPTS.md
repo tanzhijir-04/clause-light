@@ -612,3 +612,23 @@ PyMuPDF, Pillow, webdavclient3, boto3, python-socketio, python-multipart
 3. 如果某个步骤出错，修复后再继续
 4. 每个步骤结束后会自动 git commit
 5. 建议在发送每个提示词前，确保上一步的 commit 已完成
+---
+
+## Phase 7: 原文标注视图
+
+### 提示词 7.1 — 合同原文标注视图
+
+请先阅读 CLAUDE.md、AGENT.md、PRD-annotated-view.md 和 docs/PROMPT-CONTRACT-ANNOTATED-VIEW.md 了解需求全貌。
+
+然后按照 docs/PROMPT-CONTRACT-ANNOTATED-VIEW.md 中的详细规格实现合同原文标注视图功能。
+
+核心改动：
+1. 后端 API 返回合同全文（fullText 字段）
+2. 后端分析时保存 OCR 原文到数据库
+3. 前端合同详情页重写：增加「条款列表」和「原文标注」Tab 切换
+4. 原文标注渲染引擎：在全文中定位条款位置并高亮
+5. 右侧批注面板：显示风险详情、通俗解释、法律依据、修改建议
+6. 风险导航：上一条/下一条快速跳转
+7. 响应式适配：手机端批注面板变底部抽屉
+
+完成后 git commit: "feat: 实现合同原文标注视图"

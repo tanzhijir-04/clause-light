@@ -41,6 +41,7 @@ clause-light/
 ├── AGENTS.md              # 本文件
 ├── AGENT.md               # Agent 行为规范
 ├── PRD-ClauseLight.md     # 产品需求文档
+├── PRD-annotated-view.md  # 原文标注视图 PRD
 ├── README.md
 ├── requirements.txt
 ├── pyproject.toml
@@ -111,6 +112,7 @@ clause-light/
 │   └── docker-compose.yml
 │
 └── docs/                  # 文档
+    ├── PROMPT-CONTRACT-ANNOTATED-VIEW.md  # 原文标注视图开发提示词
     ├── TECHNICAL.md
     ├── CONTRIBUTING.md
     └── API.md
@@ -136,3 +138,4 @@ clause-light/
 - 所有前端代码无外部 CDN 依赖（PWA 离线可用）
 - Git commit message 使用中文
 - 代码注释使用中文
+- 每次对代码进行改动后，要推送GitHub并写详细的 commit
