@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "合同红绿灯",
+    "slug": "clause-light",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "scheme": "clauselight",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.clauselight.mobile"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.clauselight.mobile"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "允许合同红绿灯使用相机拍摄合同照片"
+        }
+      ],
+      [
+        "expo-document-picker",
+        {
+          "appleTeamId": ""
+        }
+      ]
+    ]
+  }
+}

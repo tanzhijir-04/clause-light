@@ -25,6 +25,8 @@ router = APIRouter(tags=["websocket"])
 
 # 连接管理
 active_connections: list[WebSocket] = []
+# 连接元数据：记录每个连接的 IP、连接时间、最后活跃时间
+connection_info: dict[WebSocket, dict] = {}
 
 
 @router.websocket("/ws/client")
@@ -37,7 +39,15 @@ async def websocket_client(websocket: WebSocket):
     """
     await websocket.accept()
     active_connections.append(websocket)
-    logger.info("手机端已连接，当前连接数: %d", len(active_connections))
+    # 记录连接元数据
+    client_ip = websocket.client.host if websocket.client else "unknown"
+    now = datetime.now(timezone.utc).isoformat()
+    connection_info[websocket] = {
+        "ip": client_ip,
+        "connected_at": now,
+        "last_active": now,
+    }
+    logger.info("手机端已连接 (%s)，当前连接数: %d", client_ip, len(active_connections))
 
     try:
         while True:
@@ -45,6 +55,9 @@ async def websocket_client(websocket: WebSocket):
             message = json.loads(data)
 
             msg_type = message.get("type", "")
+            # 更新最后活跃时间
+            if websocket in connection_info:
+                connection_info[websocket]["last_active"] = datetime.now(timezone.utc).isoformat()
 
             if msg_type == "analyze":
                 # 接收分析请求
@@ -172,8 +185,10 @@ async def websocket_client(websocket: WebSocket):
 
     except WebSocketDisconnect:
         active_connections.remove(websocket)
+        connection_info.pop(websocket, None)
         logger.info("手机端已断开，当前连接数: %d", len(active_connections))
     except Exception as e:
         logger.error("WebSocket 错误: %s", e)
         if websocket in active_connections:
             active_connections.remove(websocket)
+        connection_info.pop(websocket, None)

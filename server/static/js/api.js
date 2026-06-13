@@ -234,9 +234,26 @@ const API = (() => {
     },
     async devices() {
       if (USE_MOCK) return MOCK_DEVICES;
-      return _fetch('/api/devices');
+      return _fetch('/api/connection/devices');
     },
   };
 
-  return { contracts, knowledge, sync, models, settings };
+  // ── 连接管理 API ──
+  const connection = {
+    async info() {
+      return _fetch('/api/connection/info');
+    },
+    qrUrl() {
+      // 直接返回 URL，用于 <img src>
+      return '/api/connection/qr?' + Date.now();
+    },
+    async health() {
+      return _fetch('/api/connection/health');
+    },
+    async devices() {
+      return _fetch('/api/connection/devices');
+    },
+  };
+
+  return { contracts, knowledge, sync, models, settings, connection };
 })();

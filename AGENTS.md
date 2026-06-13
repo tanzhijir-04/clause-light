@@ -19,15 +19,15 @@ ClauseLight（合同红绿灯）是一个开源合同风险审查工具。
 - **文件处理**：PyMuPDF（PDF）、Pillow（图片）
 - **同步**：webdavclient3（WebDAV）、boto3（S3）
 - **WebSocket**：FastAPI 原生 WebSocket + python-socketio
-- **前端管理面板**：纯 HTML + CSS + JS，无框架
+- **前端管理面板**：React Native + TypeScript
 
-### 手机端（PWA）
-- **应用形态**：PWA（渐进式 Web 应用）
-- **前端**：纯 HTML + CSS + JS，无框架
+### 手机端（React Native）
+- **应用形态**：React Native（Expo managed workflow）
+- **前端**：React Native + TypeScript
 - **OCR**：不本地运行，发送给电脑端或云端
-- **Embedding**：Transformers.js + ONNX（浏览器内运行）
-- **本地存储**：IndexedDB
-- **通信**：WebSocket（Socket.IO 客户端）
+- **Embedding**：不本地运行，调用电脑端 API
+- **本地存储**：AsyncStorage
+- **通信**：WebSocket + HTTP API
 - **UI 风格**：移动端优先、简洁、红黄绿色彩编码
 
 ### 共享

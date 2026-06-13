@@ -19,14 +19,26 @@ const SettingsPage = {
 
   async render() {
     const llmConfig = await API.settings.llm();
-    const devices = await API.settings.devices();
+
+    // 获取连接信息
+    let connInfo = { host: '0.0.0.0', port: 8080, ws_url: 'ws://0.0.0.0:8080/ws/client' };
+    let connHealth = { status: 'ok', active_connections: 0, version: '0.1.0', uptime: 0 };
+    let connDevices = { devices: [], total: 0, online: 0 };
+    try {
+      connInfo = await API.connection.info();
+      connHealth = await API.connection.health();
+      connDevices = await API.connection.devices();
+    } catch (e) {
+      console.warn('获取连接信息失败:', e);
+    }
 
     // 设备表格
     let deviceRows = '';
-    devices.forEach(d => {
+    connDevices.devices.forEach(d => {
       const statusColor = d.status === 'online' ? 'var(--risk-green)' : 'var(--text-tertiary)';
       const statusText = d.status === 'online' ? '在线' : '离线';
       const dotClass = d.status === 'online' ? '' : ' offline';
+      const connectedTime = d.connectedAt ? new Date(d.connectedAt).toLocaleString('zh-CN') : '-';
       deviceRows += `<tr>
         <td>
           <div class="device-name-cell">
@@ -42,9 +54,15 @@ const SettingsPage = {
           </div>
         </td>
         <td class="table-cell-secondary" style="font-family:var(--font-mono)">${d.ip}</td>
-        <td class="table-cell-secondary">${d.lastSeen}</td>
+        <td class="table-cell-secondary">${connectedTime}</td>
       </tr>`;
     });
+
+    if (!deviceRows) {
+      deviceRows = `<tr><td colspan="5" style="text-align:center;color:var(--text-tertiary);padding:var(--sp-8) 0">
+        暂无设备连接，请使用手机扫描右侧二维码
+      </td></tr>`;
+    }
 
     // 远程 API 配置
     const remote = llmConfig.remote || {};
@@ -156,7 +174,60 @@ const SettingsPage = {
 
       <div class="section">
         <div class="section-title">客户端连接</div>
+        <div class="card" style="margin-bottom:var(--sp-4)">
+          <div class="card-body">
+            <div style="display:flex;gap:var(--sp-8);align-items:flex-start;flex-wrap:wrap">
+              <!-- 左侧：连接信息 -->
+              <div style="flex:1;min-width:240px">
+                <div style="margin-bottom:var(--sp-4)">
+                  <div class="form-label" style="margin-bottom:var(--sp-2)">WebSocket 地址</div>
+                  <div style="display:flex;align-items:center;gap:var(--sp-2)">
+                    <code style="flex:1;padding:var(--sp-2) var(--sp-3);background:var(--bg-muted);border-radius:var(--radius-md);font-family:var(--font-mono);font-size:var(--text-sm);word-break:break-all">${connInfo.ws_url}</code>
+                    <button class="btn btn-secondary btn-sm" onclick="SettingsPage.copyWsUrl()" title="复制地址">
+                      ${Icons.copy(14)}
+                    </button>
+                  </div>
+                </div>
+                <div style="display:flex;gap:var(--sp-6);margin-bottom:var(--sp-4)">
+                  <div>
+                    <div class="form-label" style="margin-bottom:var(--sp-1)">服务状态</div>
+                    <div style="display:flex;align-items:center;gap:var(--sp-2)">
+                      <div class="status-dot" style="background:var(--risk-green)"></div>
+                      <span style="font-size:var(--text-sm);color:var(--risk-green-text);font-weight:500">正常运行</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div class="form-label" style="margin-bottom:var(--sp-1)">活跃连接</div>
+                    <span style="font-size:var(--text-sm);font-weight:600">${connHealth.active_connections}</span>
+                  </div>
+                  <div>
+                    <div class="form-label" style="margin-bottom:var(--sp-1)">运行时间</div>
+                    <span style="font-size:var(--text-sm)">${SettingsPage._formatUptime(connHealth.uptime)}</span>
+                  </div>
+                </div>
+                <div style="font-size:var(--text-xs);color:var(--text-tertiary);line-height:1.6">
+                  手机端扫描右侧二维码即可自动连接到本机。确保手机和电脑在同一局域网内。
+                </div>
+              </div>
+              <!-- 右侧：二维码 -->
+              <div style="text-align:center;flex-shrink:0">
+                <div id="qr-code-container" style="width:200px;height:200px;border:1px solid var(--border-default);border-radius:var(--radius-lg);display:flex;align-items:center;justify-content:center;background:var(--bg-surface);overflow:hidden">
+                  <img id="qr-code-img" src="${API.connection.qrUrl()}" alt="扫码连接" style="width:100%;height:100%;object-fit:contain" onerror="this.parentElement.innerHTML='<div style=\\'color:var(--text-tertiary);font-size:var(--text-xs\\'>二维码加载失败</div>'" />
+                </div>
+                <button class="btn btn-secondary btn-sm" style="margin-top:var(--sp-3)" onclick="SettingsPage.refreshQr()">
+                  ${Icons.refresh(14)} 刷新二维码
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 已连接设备 -->
         <div class="card">
+          <div class="card-header">
+            <div class="card-title">已连接设备</div>
+            <span style="font-size:var(--text-xs);color:var(--text-tertiary)">${connDevices.online} / ${connDevices.total} 在线</span>
+          </div>
           <div class="card-body" style="padding:0">
             <table>
               <thead>
@@ -165,7 +236,7 @@ const SettingsPage = {
                   <th>类型</th>
                   <th>状态</th>
                   <th>IP 地址</th>
-                  <th>最近活跃</th>
+                  <th>连接时间</th>
                 </tr>
               </thead>
               <tbody>${deviceRows}</tbody>
@@ -394,5 +465,34 @@ const SettingsPage = {
     if (confirm('确定要清除所有数据吗？此操作不可恢复！')) {
       Components.toast('清除功能将在后端 API 实现后可用', 'info');
     }
+  },
+
+  /** 复制 WebSocket 地址到剪贴板 */
+  async copyWsUrl() {
+    try {
+      const info = await API.connection.info();
+      await navigator.clipboard.writeText(info.ws_url);
+      Components.toast('已复制 WebSocket 地址', 'success');
+    } catch {
+      Components.toast('复制失败', 'error');
+    }
+  },
+
+  /** 刷新二维码 */
+  refreshQr() {
+    const img = document.getElementById('qr-code-img');
+    if (img) {
+      img.src = API.connection.qrUrl();
+    }
+  },
+
+  /** 格式化运行时间 */
+  _formatUptime(seconds) {
+    if (!seconds || seconds < 0) return '-';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    if (h > 0) return `${h}小时${m}分钟`;
+    if (m > 0) return `${m}分钟`;
+    return `${seconds}秒`;
   },
 };

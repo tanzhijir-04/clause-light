@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>合同红绿灯 — Mobile Prototype</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    @media (min-width: 500px) {
+      body { background: #1a1a1a; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+      #root { width: 390px; height: 844px; border-radius: 40px; overflow: hidden; box-shadow: 0 0 0 12px #333, 0 20px 60px rgba(0,0,0,0.5); position: relative; }
+      #root::before { content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 126px; height: 34px; background: #000; border-radius: 0 0 20px 20px; z-index: 999; }
+      #root::after { content: ''; position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 134px; height: 5px; background: rgba(255,255,255,0.3); border-radius: 3px; z-index: 999; }
+      [data-theme="dark"] #root::after { background: rgba(255,255,255,0.2); }
+      #root .top-bar { padding-top: 48px; }
+    }
+    @media (max-width: 499px) { #root { max-width: 100%; } }
+    /* Loading indicator */
+    #root:empty::after { content: '加载中...'; display: block; text-align: center; padding-top: 40vh; color: #999; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel" src="data.jsx"></script>
+  <script type="text/babel" src="icons.jsx"></script>
+  <script type="text/babel" src="components.jsx"></script>
+  <script type="text/babel" src="_page_home.jsx"></script>
+  <script type="text/babel" src="_page_analysis.jsx"></script>
+  <script type="text/babel" src="_page_result.jsx"></script>
+  <script type="text/babel" src="_page_history.jsx"></script>
+  <script type="text/babel" src="_page_knowledge.jsx"></script>
+  <script type="text/babel" src="_page_settings.jsx"></script>
+  <script type="text/babel" src="app.jsx"></script>
+</body>
+</html>

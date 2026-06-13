@@ -144,38 +144,14 @@ from server.api.knowledge import router as knowledge_router
 from server.api.models import router as models_router
 from server.api.sync import router as sync_router
 from server.api.ws import router as ws_router
+from server.api.connection import router as connection_router
 
 app.include_router(contracts_router)
 app.include_router(knowledge_router)
 app.include_router(models_router)
 app.include_router(sync_router)
 app.include_router(ws_router)
-
-
-# ── 设备列表（临时 mock） ──
-
-
-@app.get("/api/devices")
-async def list_devices():
-    """连接设备列表"""
-    return [
-        {
-            "id": "1",
-            "name": "iPhone 15 Pro",
-            "type": "mobile",
-            "status": "online",
-            "lastSeen": "刚刚",
-            "ip": "192.168.1.105",
-        },
-        {
-            "id": "2",
-            "name": "iPad Air",
-            "type": "tablet",
-            "status": "offline",
-            "lastSeen": "2 小时前",
-            "ip": "192.168.1.108",
-        },
-    ]
+app.include_router(connection_router)
 
 
 # ── LLM 配置接口 ──
