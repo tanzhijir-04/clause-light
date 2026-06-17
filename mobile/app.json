@@ -26,13 +26,11 @@
       },
       "package": "com.clauselight.mobile"
     },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/icon.png"
+    },
     "plugins": [
-      [
-        "expo-camera",
-        {
-          "cameraPermission": "允许合同红绿灯使用相机拍摄合同照片"
-        }
-      ],
       [
         "expo-document-picker",
         {

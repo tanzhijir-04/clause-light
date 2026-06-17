@@ -36,3 +36,5 @@ data/uploads/
 
 # Node
 node_modules/
+.expo/
+mobile/.expo/
