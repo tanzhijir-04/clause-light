@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 import qrcode
 import qrcode.image.svg
 from fastapi import APIRouter
-from fastapi.responses import ImageResponse
+from fastapi.responses import Response
 
 from server.config import settings
 
@@ -76,7 +76,7 @@ async def connection_qr():
     img.save(buf, format="PNG")
     buf.seek(0)
 
-    return ImageResponse(
+    return Response(
         content=buf.getvalue(),
         media_type="image/png",
         headers={
