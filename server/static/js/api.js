@@ -44,7 +44,7 @@ const MOCK_STATS = {
   thisMonth: 4,
   totalRules: 8,
   avgScore: 59,
-  totalDevices: 1,
+  totalDevices: 0,
   pendingReview: 2,
   totalLaws: 70,
   avgConfidence: 0.88,

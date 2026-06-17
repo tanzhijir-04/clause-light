@@ -5,6 +5,7 @@ const DashboardPage = {
   async render() {
     const contracts = await API.contracts.list();
     const stats = await API.knowledge.stats();
+    const devices = await API.connection.devices().catch(() => ({ total: 0 }));
 
     // 最近分析表格
     let tableRows = '';
@@ -55,7 +56,7 @@ const DashboardPage = {
           ${Components.StatCard('合同总数', stats.totalContracts, `本月 +${stats.thisMonth}`, 'up', 'fileText')}
           ${Components.StatCard('平均风险分', stats.avgScore, '较上月 +3', 'up', 'barChart')}
           ${Components.StatCard('知识库规则', stats.totalRules, '自动学习 +1', 'up', 'book')}
-          ${Components.StatCard('连接设备', stats.totalDevices || 1, 'iPhone 15 Pro 在线', 'up', 'smartphone')}
+          ${Components.StatCard('连接设备', devices.total || 0, devices.total > 0 ? `${devices.total} 台在线` : '暂无设备', devices.total > 0 ? 'up' : 'neutral', 'smartphone')}
         </div>
 
         <div class="dashboard-grid">

@@ -204,7 +204,6 @@ class KnowledgeEngine:
             "totalContracts": total_contracts,
             "thisMonth": this_month,
             "avgScore": round(float(avg_score), 1),
-            "totalDevices": 1,  # 暂时硬编码
             "redCount": red_count,
             "yellowCount": yellow_count,
             "greenCount": green_count,
