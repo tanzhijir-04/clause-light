@@ -181,6 +181,14 @@ const API = (() => {
       if (USE_MOCK) return MOCK_LAWS;
       return _fetch('/api/knowledge/laws');
     },
+    async approveRule(id) {
+      if (USE_MOCK) return { success: true };
+      return _fetch(`/api/knowledge/pending/${id}/approve`, { method: 'POST' });
+    },
+    async rejectRule(id) {
+      if (USE_MOCK) return { success: true };
+      return _fetch(`/api/knowledge/pending/${id}/reject`, { method: 'POST' });
+    },
   };
 
   /** 同步相关 API */

@@ -74,10 +74,18 @@ export interface FeedbackResponse {
   success: boolean;
 }
 
-// 知识库统计
+// 知识库统计（字段名与后端 knowledge.py get_stats() 一致）
 export interface KnowledgeStats {
-  ruleCount: number;
-  lawCount: number;
+  totalRules: number;
+  totalLaws: number;
+  avgConfidence: number;
+  pendingReview: number;
+  totalContracts: number;
+  thisMonth: number;
+  avgScore: number;
+  redCount: number;
+  yellowCount: number;
+  greenCount: number;
 }
 
 // WebSocket 消息类型

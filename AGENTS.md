@@ -13,13 +13,13 @@ ClauseLight（合同红绿灯）是一个开源合同风险审查工具。
 - **Web 框架**：FastAPI + uvicorn
 - **数据库**：SQLite（通过 SQLAlchemy ORM）
 - **OCR**：PaddleOCR-VL（paddlepaddle + paddleocr）
-- **Embedding**：sentence-transformers（本地运行）
+- **Embedding**：sentence-transformers（已声明依赖，embedding.py 待实现）
 - **LLM 调用**：openai SDK（兼容 OpenAI/DeepSeek/通义千问等 OpenAI 格式 API）
 - **本地 LLM**：Ollama（通过 OpenAI 兼容接口调用）
 - **文件处理**：PyMuPDF（PDF）、Pillow（图片）
-- **同步**：webdavclient3（WebDAV）、boto3（S3）
-- **WebSocket**：FastAPI 原生 WebSocket + python-socketio
-- **前端管理面板**：React Native + TypeScript
+- **同步**：webdavclient3（WebDAV）、boto3（S3）（已声明依赖，sync/ 待实现）
+- **WebSocket**：FastAPI 原生 WebSocket
+- **前端管理面板**：纯 HTML + CSS + JS，无框架
 
 ### 手机端（React Native）
 - **应用形态**：React Native（Expo managed workflow）
@@ -54,39 +54,60 @@ clause-light/
 │   │   ├── contracts.py   # 合同分析接口
 │   │   ├── knowledge.py   # 知识库接口
 │   │   ├── sync.py        # 同步接口
-│   │   └── ws.py          # WebSocket 接口
+│   │   ├── ws.py          # WebSocket 接口
+│   │   ├── connection.py  # 手机端连接管理
+│   │   └── models.py      # OCR 模型管理
 │   ├── core/              # 核心逻辑
 │   │   ├── agent.py       # Agent Harness（流程编排）
 │   │   ├── ocr.py         # PaddleOCR 封装
 │   │   ├── llm.py         # LLM 网关（多模型路由）
-│   │   ├── embedding.py   # Embedding 服务
 │   │   ├── knowledge.py   # 知识库引擎
-│   │   └── prompts/       # Prompt 模板
-│   │       ├── classify.py
-│   │       ├── split.py
-│   │       ├── analyze.py
-│   │       ├── suggest.py
-│   │       └── score.py
+│   │   ├── model_manager.py # OCR 模型下载管理
+│   │   ├── prompts/       # Prompt 模板
+│   │   │   ├── classify.py
+│   │   │   ├── split.py
+│   │   │   ├── analyze.py
+│   │   │   ├── suggest.py
+│   │   │   └── score.py
+│   │   └── workers/       # 三段式分析流水线
+│   │       ├── parser.py
+│   │       ├── workers.py
+│   │       └── evaluator.py
 │   ├── models/            # 数据模型
 │   │   └── database.py    # SQLAlchemy 模型 + SQLite
-│   ├── sync/              # 同步引擎
-│   │   ├── webdav.py
-│   │   ├── git_sync.py
-│   │   └── s3_sync.py
-│   └── static/            # Web 管理面板
+│   ├── sync/              # 同步引擎（待实现）
+│   │   └── __init__.py
+│   └── static/            # Web 管理面板（纯 HTML/CSS/JS）
 │       ├── index.html
-│       ├── css/style.css
-│       ├── js/app.js
-│       └── pages/
+│       ├── css/
+│       │   ├── tokens.css
+│       │   ├── base.css
+│       │   ├── layout.css
+│       │   ├── components.css
+│       │   └── pages.css
+│       └── js/
+│           ├── app.js
+│           ├── router.js
+│           ├── api.js
+│           ├── components.js
+│           ├── icons.js
+│           ├── theme.js
+│           └── pages/
 │
-├── mobile/                # 手机端 PWA
-│   ├── index.html
-│   ├── css/style.css
-│   ├── js/app.js
-│   ├── js/ocr.js          # OCR 通信
-│   ├── js/agent.js        # Agent Harness（手机端精简版）
-│   ├── manifest.json
-│   └── sw.js
+├── mobile/                # 手机端 React Native（Expo）
+│   ├── App.tsx            # 根组件
+│   ├── app.json           # Expo 配置
+│   ├── package.json
+│   ├── tsconfig.json
+│   └── src/
+│       ├── screens/       # 页面组件
+│       ├── components/    # 通用组件
+│       ├── services/      # API/WebSocket 服务
+│       ├── contexts/      # React Context
+│       ├── navigation/    # 导航配置
+│       ├── theme/         # 主题/颜色
+│       ├── types/         # TypeScript 类型
+│       └── utils/         # 工具函数
 │
 ├── shared/                # 共享数据
 │   ├── rules/             # 知识库规则（JSON）

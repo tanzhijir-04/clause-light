@@ -103,7 +103,7 @@ export default function KnowledgeScreen({ navigation }: KnowledgeScreenProps) {
         {stats && (
           <View style={[styles.statsBar, { backgroundColor: colors.muted }]}>
             <Text style={[styles.statsText, { color: colors.textSecondary }]}>
-              {stats.ruleCount} 条规则 | {stats.lawCount} 部法规
+              {stats.totalRules} 条规则 | {stats.totalLaws} 部法规
             </Text>
           </View>
         )}

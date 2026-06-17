@@ -10,7 +10,7 @@
 ### 1. 技术栈边界
 - **后端只能用**：Python、FastAPI、SQLAlchemy、SQLite、PaddleOCR、sentence-transformers、openai SDK、webdavclient3、boto3
 - **前端只能用**：纯 HTML、CSS、JavaScript（ES6+），不能引入 React/Vue/Angular 等框架
-- **不能用**：PostgreSQL、MongoDB、Redis、Docker（除最终部署外）、TypeScript
+- **不能用**：PostgreSQL、MongoDB、Redis、Docker（除最终部署外）
 - **新增依赖**前必须先说明理由，获得确认后才能添加
 
 ### 2. 架构边界
@@ -93,7 +93,7 @@ Phase 3: API 层
 
 Phase 4: 前端
   4.1 电脑端管理面板
-  4.2 手机端 PWA
+  4.2 手机端 React Native（Expo）
 
 Phase 5: 知识库数据
   5.1 基础规则库（50+ 条）

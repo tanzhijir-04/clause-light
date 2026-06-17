@@ -70,7 +70,7 @@ const KnowledgePage = {
     // 绑定 toggle 事件
     rules.forEach(r => {
       Components.onToggle('rule-' + r.id, (on) => {
-        API.knowledge.updateRule(r.id, { active: on });
+        API.knowledge.updateRule(r.id, { is_active: on });
       });
     });
 
@@ -220,7 +220,7 @@ const KnowledgePage = {
     const text = prompt('请输入规则内容：');
     if (text && text.trim()) {
       const category = prompt('类别（通用/租赁/劳动/装修/外包）：') || '通用';
-      API.knowledge.createRule({ text: text.trim(), category }).then(res => {
+      API.knowledge.createRule({ rule_text: text.trim(), category }).then(res => {
         if (res && res.success) {
           App.renderCurrentPage();
         }
@@ -229,13 +229,13 @@ const KnowledgePage = {
   },
 
   approveRule(id) {
-    API.knowledge.updateRule(id, { status: 'approved' }).then(res => {
+    API.knowledge.approveRule(id).then(res => {
       if (res && res.success) App.renderCurrentPage();
     });
   },
 
   rejectRule(id) {
-    API.knowledge.updateRule(id, { status: 'rejected' }).then(res => {
+    API.knowledge.rejectRule(id).then(res => {
       if (res && res.success) App.renderCurrentPage();
     });
   },
