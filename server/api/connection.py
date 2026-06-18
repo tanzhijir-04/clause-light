@@ -107,14 +107,19 @@ async def connection_devices():
     from server.api.ws import active_connections, connection_info
 
     devices = []
-    for i, ws in enumerate(active_connections):
+    for ws in active_connections:
         info = connection_info.get(ws, {})
+        # 使用 IP 和端口组合作为稳定的设备 ID
+        client_ip = info.get("ip", "unknown")
+        client_port = ws.client.port if ws.client else 0
+        device_id = f"{client_ip}:{client_port}"
+
         devices.append({
-            "id": f"ws-{i}",
+            "id": device_id,
             "name": "手机端",
             "type": "mobile",
             "status": "online",
-            "ip": info.get("ip", "unknown"),
+            "ip": client_ip,
             "connectedAt": info.get("connected_at", ""),
             "lastActive": info.get("last_active", ""),
         })

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { setBaseUrl } from '../services/api';
 
 const CONNECTION_STORAGE_KEY = '@clauselight/connection';
 
@@ -85,6 +86,11 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     }
     return `ws://${config.serverIp}:${config.port}/ws/client`;
   }, [config]);
+
+  // 同步 api.ts 的基础 URL
+  useEffect(() => {
+    setBaseUrl(baseUrl);
+  }, [baseUrl]);
 
   // 测试连接
   const testConnection = useCallback(async (): Promise<boolean> => {
