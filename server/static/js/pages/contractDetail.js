@@ -58,8 +58,8 @@ const ContractDetailPage = {
             <div style="display:flex;align-items:center;gap:var(--sp-2);margin-bottom:var(--sp-1)">
               <button class="btn btn-ghost btn-sm" onclick="Router.navigate('contracts')" style="margin-left:-8px">${Icons.chevronRight(16)} 返回</button>
             </div>
-            <div class="content-title">${contract.title}</div>
-            <div class="content-subtitle">${contract.type} · ${contract.createdAt}</div>
+            <div class="content-title">${Components.escapeHtml(contract.title)}</div>
+            <div class="content-subtitle">${Components.escapeHtml(contract.type)} · ${Components.escapeHtml(contract.createdAt)}</div>
           </div>
           <div style="display:flex;align-items:center;gap:var(--sp-4)">
             <div class="risk-nav">
@@ -123,19 +123,19 @@ const ContractDetailPage = {
                  onclick="ContractDetailPage._selectClause('${clause.id}')"
                  onmouseenter="this.style.background='var(--bg-surface-hover)'" onmouseleave="this.style.background='var(--bg-surface)'">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--sp-2)">
-                <div style="font-weight:600">${clause.clauseNumber || '条款'}</div>
+                <div style="font-weight:600">${Components.escapeHtml(clause.clauseNumber || '条款')}</div>
                 ${Components.RiskBadge(clause.riskLevel)}
               </div>
-              <div style="font-size:var(--text-sm);color:var(--text-secondary);margin-bottom:var(--sp-2)">${clause.clauseTitle || ''}</div>
-              <div style="font-size:var(--text-sm);margin-bottom:var(--sp-2)">${clause.riskSummary || '本维度无明显风险'}</div>
+              <div style="font-size:var(--text-sm);color:var(--text-secondary);margin-bottom:var(--sp-2)">${Components.escapeHtml(clause.clauseTitle || '')}</div>
+              <div style="font-size:var(--text-sm);margin-bottom:var(--sp-2)">${Components.escapeHtml(clause.riskSummary || '本维度无明显风险')}</div>
               ${clause.suggestedClause ? `
                 <div style="font-size:var(--text-sm);color:var(--accent);background:var(--accent-subtle);padding:var(--sp-2);border-radius:var(--radius-sm);border-left:3px solid var(--accent)">
-                  <strong>修改建议：</strong>${clause.suggestedClause.length > 100 ? clause.suggestedClause.slice(0, 100) + '...' : clause.suggestedClause}
+                  <strong>修改建议：</strong>${Components.escapeHtml(clause.suggestedClause.length > 100 ? clause.suggestedClause.slice(0, 100) + '...' : clause.suggestedClause)}
                 </div>
               ` : ''}
               ${clause.legalBasis ? `
                 <div style="font-size:var(--text-xs);color:var(--text-tertiary);margin-top:var(--sp-2);font-style:italic">
-                  法律依据：${clause.legalBasis}
+                  法律依据：${Components.escapeHtml(clause.legalBasis)}
                 </div>
               ` : ''}
             </div>
@@ -286,13 +286,9 @@ const ContractDetailPage = {
     return result;
   },
 
-  /** HTML 转义 */
+  /** HTML 转义（委托给全局 Components.escapeHtml） */
   _escapeHtml(str) {
-    return str
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+    return Components.escapeHtml(str);
   },
 
   // ── 批注面板渲染 ──
@@ -307,7 +303,7 @@ const ContractDetailPage = {
       sections += `
         <div class="anno-section">
           <div class="anno-section-title">问题摘要</div>
-          <div class="anno-section-content">${clause.riskSummary}</div>
+          <div class="anno-section-content">${Components.escapeHtml(clause.riskSummary)}</div>
         </div>`;
     }
 
@@ -316,7 +312,7 @@ const ContractDetailPage = {
       sections += `
         <div class="anno-section">
           <div class="anno-section-title">通俗解释</div>
-          <div class="anno-section-content">${clause.plainExplanation}</div>
+          <div class="anno-section-content">${Components.escapeHtml(clause.plainExplanation)}</div>
         </div>`;
     }
 
@@ -325,7 +321,7 @@ const ContractDetailPage = {
       sections += `
         <div class="anno-section">
           <div class="anno-section-title">法律依据</div>
-          <div class="anno-section-content legal">${clause.legalBasis}</div>
+          <div class="anno-section-content legal">${Components.escapeHtml(clause.legalBasis)}</div>
         </div>`;
     }
 
@@ -334,7 +330,7 @@ const ContractDetailPage = {
       sections += `
         <div class="anno-section">
           <div class="anno-section-title">修改建议</div>
-          <div class="anno-section-content suggest">${clause.suggestedClause}</div>
+          <div class="anno-section-content suggest">${Components.escapeHtml(clause.suggestedClause)}</div>
         </div>`;
     }
 
@@ -366,7 +362,7 @@ const ContractDetailPage = {
       <div class="anno-header">
         <div style="display:flex;align-items:center;gap:var(--sp-2);min-width:0">
           ${Components.RiskBadge(clause.riskLevel)}
-          <span style="font-weight:600;font-size:var(--text-sm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${clause.clauseTitle || clause.clauseNumber || '条款'}</span>
+          <span style="font-weight:600;font-size:var(--text-sm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${Components.escapeHtml(clause.clauseTitle || clause.clauseNumber || '条款')}</span>
         </div>
         <div class="anno-close" onclick="ContractDetailPage._closeAnnotation()">${Icons.x(16)}</div>
       </div>

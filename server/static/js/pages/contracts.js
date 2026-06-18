@@ -24,13 +24,13 @@ const ContractsPage = {
     contracts.forEach(c => {
       const scoreClass = c.score >= 70 ? 'score-green' : c.score >= 50 ? 'score-yellow' : 'score-red';
       tableRows += `<tr class="table-row-clickable" onclick="Router.navigate('contracts/${c.id}')">
-        <td style="font-weight:500">${c.title}</td>
-        <td class="table-cell-secondary">${c.type}</td>
+        <td style="font-weight:500">${Components.escapeHtml(c.title)}</td>
+        <td class="table-cell-secondary">${Components.escapeHtml(c.type)}</td>
         <td>${Components.RiskBadge(c.riskLevel)}</td>
         <td><span class="${scoreClass}" style="font-weight:600;font-size:var(--text-md)">${c.score}</span></td>
         <td style="min-width:120px">${Components.RiskDistBar(c.redCount, c.yellowCount, c.greenCount)}</td>
-        <td class="table-cell-secondary">${c.model}</td>
-        <td class="table-cell-secondary">${c.createdAt}</td>
+        <td class="table-cell-secondary">${Components.escapeHtml(c.model)}</td>
+        <td class="table-cell-secondary">${Components.escapeHtml(c.createdAt)}</td>
       </tr>`;
     });
 
@@ -49,7 +49,7 @@ const ContractsPage = {
         <div class="filter-bar">
           <div class="search-input-wrapper" style="flex:1">
             <span class="search-icon">${Icons.search(16)}</span>
-            <input class="input" placeholder="搜索合同名称..." value="${this._searchTerm}" oninput="ContractsPage.onSearch(this.value)">
+            <input class="input" placeholder="搜索合同名称..." value="${Components.escapeHtml(this._searchTerm)}" oninput="ContractsPage.onSearch(this.value)">
           </div>
           <select class="select" onchange="ContractsPage.onTypeFilter(this.value)">
             <option value="">所有类型</option>

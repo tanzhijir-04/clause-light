@@ -22,7 +22,7 @@ const ModelsPage = {
         : `<button class="btn btn-sm btn-primary" onclick="ModelsPage.downloadModel('${m.type}')">下载</button>`;
 
       modelRows += `<tr>
-        <td style="font-weight:500">${m.description}</td>
+        <td style="font-weight:500">${Components.escapeHtml(m.description)}</td>
         <td>${statusLabel}</td>
         <td style="font-family:var(--font-mono);font-size:var(--text-xs)">${sizeText}</td>
         <td>${actionBtn}</td>

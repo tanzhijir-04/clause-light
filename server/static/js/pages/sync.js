@@ -48,8 +48,8 @@ const SyncPage = {
         <div class="sync-history-item">
           <div class="sync-history-dot ${log.status}"></div>
           <div class="sync-history-info">
-            <div class="sync-history-title">${log.type} ${log.direction === 'push' ? '上传' : '下载'}</div>
-            <div class="sync-history-detail">${log.details}</div>
+            <div class="sync-history-title">${Components.escapeHtml(log.type)} ${log.direction === 'push' ? '上传' : '下载'}</div>
+            <div class="sync-history-detail">${Components.escapeHtml(log.details)}</div>
           </div>
           <div class="sync-history-time">${log.time}</div>
         </div>`;

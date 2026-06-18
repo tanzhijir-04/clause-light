@@ -3,10 +3,22 @@
  */
 const Components = (() => {
 
+  /** XSS 防护：转义 HTML 特殊字符，防止用户数据被当作 HTML 解析 */
+  function escapeHtml(text) {
+    if (text === null || text === undefined) return '';
+    const str = String(text);
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   /** 风险徽章 */
   function RiskBadge(level, label) {
     const labels = { red: '高风险', yellow: '中风险', green: '低风险' };
-    return `<span class="risk-badge ${level}"><span class="risk-dot ${level}"></span>${label || labels[level] || level}</span>`;
+    return `<span class="risk-badge ${escapeHtml(level)}"><span class="risk-dot ${escapeHtml(level)}"></span>${escapeHtml(label || labels[level] || level)}</span>`;
   }
 
   /** 统计卡片 */
@@ -209,7 +221,7 @@ const Components = (() => {
     el.className = `toast ${type}`;
     el.innerHTML = `
       <span class="toast-icon">${iconMap[type] || iconMap.info}</span>
-      <span class="toast-message">${message}</span>
+      <span class="toast-message">${escapeHtml(message)}</span>
       <span class="toast-close" onclick="this.parentElement.remove()">${Icons.x(14)}</span>`;
     container.appendChild(el);
     if (duration > 0) {
@@ -252,6 +264,7 @@ const Components = (() => {
   }
 
   return {
+    escapeHtml,
     RiskBadge, StatCard, RiskDistBar, ScoreRing, Toggle,
     onToggle, handleToggle, ProgressBar, UploadZone, handleFileUpload,
     Sidebar, toast, RiskDistInteractive, SeverityBar,

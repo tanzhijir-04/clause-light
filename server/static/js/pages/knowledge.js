@@ -54,8 +54,8 @@ const KnowledgePage = {
     rules.forEach(r => {
       const sourceMap = { manual: '手动', auto_learned: '自动学习', user_feedback: '用户反馈' };
       tableRows += `<tr>
-        <td class="rule-text-cell">${r.text}</td>
-        <td><span class="risk-badge" style="background:var(--accent-subtle);color:var(--accent);border:1px solid var(--accent)">${r.category}</span></td>
+        <td class="rule-text-cell">${Components.escapeHtml(r.text)}</td>
+        <td><span class="risk-badge" style="background:var(--accent-subtle);color:var(--accent);border:1px solid var(--accent)">${Components.escapeHtml(r.category)}</span></td>
         <td>
           <div class="confidence-cell">
             <div class="progress-bar confidence-bar"><div class="progress-bar-fill accent" style="width:${r.confidence * 100}%"></div></div>
@@ -79,7 +79,7 @@ const KnowledgePage = {
       <div style="display:flex;gap:var(--sp-3);margin-bottom:var(--sp-4)">
         <div class="search-input-wrapper" style="flex:1">
           <span class="search-icon">${Icons.search(16)}</span>
-          <input class="input" placeholder="搜索规则..." value="${this._searchTerm}" oninput="KnowledgePage.onSearch(this.value)">
+          <input class="input" placeholder="搜索规则..." value="${Components.escapeHtml(this._searchTerm)}" oninput="KnowledgePage.onSearch(this.value)">
         </div>
         <select class="select" onchange="KnowledgePage.onCategoryFilter(this.value)">
           <option value="">所有类别</option>
@@ -123,7 +123,7 @@ const KnowledgePage = {
       cardsHtml += `
         <div class="card">
           <div class="card-header">
-            <h3>${law.name}</h3>
+            <h3>${Components.escapeHtml(law.name)}</h3>
             <span class="table-cell-secondary">${law.articles} 条</span>
           </div>
           <div class="card-body">
@@ -147,7 +147,7 @@ const KnowledgePage = {
     let tableRows = '';
     pending.forEach(r => {
       tableRows += `<tr>
-        <td style="font-weight:500">${r.text}</td>
+        <td style="font-weight:500">${Components.escapeHtml(r.text)}</td>
         <td class="table-cell-secondary">${sourceMap[r.source] || r.source}</td>
         <td class="table-cell-secondary">${(r.confidence * 100).toFixed(0)}%</td>
         <td>
@@ -183,7 +183,7 @@ const KnowledgePage = {
     topRules.forEach(r => {
       barsHtml += `
         <div style="display:flex;align-items:center;gap:var(--sp-3);margin-bottom:var(--sp-3)">
-          <span style="font-size:var(--text-xs);color:var(--text-secondary);width:180px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.text}</span>
+          <span style="font-size:var(--text-xs);color:var(--text-secondary);width:180px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${Components.escapeHtml(r.text)}</span>
           <div class="progress-bar" style="flex:1"><div class="progress-bar-fill accent" style="width:${(r.usageCount / 45) * 100}%"></div></div>
           <span class="table-cell-secondary" style="width:30px;text-align:right">${r.usageCount}</span>
         </div>`;

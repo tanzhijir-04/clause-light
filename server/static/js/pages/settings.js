@@ -43,7 +43,7 @@ const SettingsPage = {
         <td>
           <div class="device-name-cell">
             ${Icons.smartphone(16)}
-            <span style="font-weight:500">${d.name}</span>
+            <span style="font-weight:500">${Components.escapeHtml(d.name)}</span>
           </div>
         </td>
         <td class="table-cell-secondary">${d.type === 'mobile' ? '手机' : '平板'}</td>

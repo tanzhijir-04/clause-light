@@ -12,11 +12,11 @@ const DashboardPage = {
     contracts.forEach(c => {
       const scoreClass = c.score >= 70 ? 'score-green' : c.score >= 50 ? 'score-yellow' : 'score-red';
       tableRows += `<tr>
-        <td style="font-weight:500">${c.title}</td>
-        <td class="table-cell-secondary">${c.type}</td>
+        <td style="font-weight:500">${Components.escapeHtml(c.title)}</td>
+        <td class="table-cell-secondary">${Components.escapeHtml(c.type)}</td>
         <td><span class="${scoreClass}" style="font-weight:600">${c.score}</span></td>
         <td style="min-width:120px">${Components.RiskDistBar(c.redCount, c.yellowCount, c.greenCount)}</td>
-        <td class="table-cell-secondary">${c.createdAt}</td>
+        <td class="table-cell-secondary">${Components.escapeHtml(c.createdAt)}</td>
       </tr>`;
     });
 
