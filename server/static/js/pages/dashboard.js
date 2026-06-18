@@ -5,7 +5,7 @@ const DashboardPage = {
   async render() {
     const contracts = await API.contracts.list();
     const stats = await API.knowledge.stats();
-    const devices = await API.connection.devices().catch(() => ({ total: 0 }));
+    const devices = await API.connection.devices().catch(() => ({ total: 0, devices: [] }));
 
     // 最近分析表格
     let tableRows = '';
