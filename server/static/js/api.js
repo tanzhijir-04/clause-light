@@ -138,6 +138,10 @@ const API = (() => {
         body: form,
       });
     },
+    async delete(id) {
+      if (USE_MOCK) return { success: true };
+      return _fetch(`/api/contracts/${id}`, { method: 'DELETE' });
+    },
   };
 
   /** 知识库相关 API */

@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.config import TYPE_EN_MAP, settings
@@ -310,3 +310,49 @@ async def submit_feedback(
 
     clause.user_feedback = feedback
     return {"success": True}
+
+
+@router.delete("/{contract_id}")
+async def delete_contract(
+    contract_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """删除合同及其关联的分析记录和条款分析"""
+    # 验证合同是否存在
+    stmt = select(Contract).where(Contract.id == contract_id)
+    result = await db.execute(stmt)
+    contract = result.scalar_one_or_none()
+    if not contract:
+        raise HTTPException(status_code=404, detail="合同不存在")
+
+    # 查询该合同的所有分析 ID（用于级联删除条款分析）
+    analysis_stmt = select(Analysis.id).where(Analysis.contract_id == contract_id)
+    analysis_result = await db.execute(analysis_stmt)
+    analysis_ids = [row[0] for row in analysis_result.all()]
+
+    # 1. 删除条款分析（依赖 analysis_id）
+    if analysis_ids:
+        await db.execute(
+            delete(ClauseAnalysis).where(ClauseAnalysis.analysis_id.in_(analysis_ids))
+        )
+
+    # 2. 删除分析记录（依赖 contract_id）
+    await db.execute(
+        delete(Analysis).where(Analysis.contract_id == contract_id)
+    )
+
+    # 3. 删除合同记录
+    await db.execute(
+        delete(Contract).where(Contract.id == contract_id)
+    )
+
+    # 4. 删除上传的源文件（如果存在）
+    if contract.source_file and os.path.exists(contract.source_file):
+        try:
+            os.remove(contract.source_file)
+        except OSError:
+            logger.warning("无法删除源文件: %s", contract.source_file)
+
+    await db.commit()
+
+    return {"success": True, "message": "合同已删除"}

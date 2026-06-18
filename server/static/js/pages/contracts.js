@@ -31,6 +31,11 @@ const ContractsPage = {
         <td style="min-width:120px">${Components.RiskDistBar(c.redCount, c.yellowCount, c.greenCount)}</td>
         <td class="table-cell-secondary">${Components.escapeHtml(c.model)}</td>
         <td class="table-cell-secondary">${Components.escapeHtml(c.createdAt)}</td>
+        <td>
+          <button class="btn btn-danger btn-sm btn-icon" onclick="event.stopPropagation();ContractsPage.deleteContract('${c.id}','${Components.escapeHtml(c.title)}')" title="删除合同">
+            ${Icons.trash(14)}
+          </button>
+        </td>
       </tr>`;
     });
 
@@ -79,6 +84,7 @@ const ContractsPage = {
                 <th>风险分布</th>
                 <th>使用模型</th>
                 <th>分析日期</th>
+                <th style="width:60px">操作</th>
               </tr>
             </thead>
             <tbody>${tableRows}</tbody>
@@ -108,5 +114,24 @@ const ContractsPage = {
 
   handleUpload(input) {
     Components.handleFileUpload(input);
+  },
+
+  /** 删除合同 */
+  async deleteContract(contractId, contractTitle) {
+    if (!confirm(`确定要删除合同「${contractTitle}」吗？此操作不可恢复。`)) {
+      return;
+    }
+    try {
+      const res = await API.contracts.delete(contractId);
+      if (res && res.success) {
+        Components.toast('合同已删除', 'success');
+        // 重新渲染当前页面（保持搜索/筛选状态）
+        App.renderCurrentPage();
+      } else {
+        Components.toast('删除失败：' + (res?.detail || '未知错误'), 'error');
+      }
+    } catch (e) {
+      Components.toast('删除失败：' + e.message, 'error');
+    }
   }
 };

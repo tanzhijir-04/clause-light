@@ -62,6 +62,9 @@ const ContractDetailPage = {
             <div class="content-subtitle">${Components.escapeHtml(contract.type)} · ${Components.escapeHtml(contract.createdAt)}</div>
           </div>
           <div style="display:flex;align-items:center;gap:var(--sp-4)">
+            <button class="btn btn-danger btn-sm" onclick="ContractDetailPage._deleteContract()" title="删除合同">
+              ${Icons.trash(14)} 删除
+            </button>
             <div class="risk-nav">
               <button class="risk-nav-btn" onclick="ContractDetailPage._navigateRisk(-1)" id="risk-prev">${Icons.chevronRight(16)} 上一条</button>
               <span class="risk-nav-count" id="risk-count">${this._riskClauses.length > 0 ? '1/' + this._riskClauses.length : '—'}</span>
@@ -518,6 +521,26 @@ const ContractDetailPage = {
       Components.toast(feedback === 'correct' ? '已标注为准确' : '已标注为不准确', 'success');
     } catch (e) {
       Components.toast('提交失败：' + e.message, 'error');
+    }
+  },
+
+  /** 删除合同 */
+  async _deleteContract() {
+    const contract = this._contract;
+    if (!contract) return;
+    if (!confirm(`确定要删除合同「${contract.title}」吗？此操作不可恢复。`)) {
+      return;
+    }
+    try {
+      const res = await API.contracts.delete(contract.id);
+      if (res && res.success) {
+        Components.toast('合同已删除', 'success');
+        Router.navigate('contracts');
+      } else {
+        Components.toast('删除失败：' + (res?.detail || '未知错误'), 'error');
+      }
+    } catch (e) {
+      Components.toast('删除失败：' + e.message, 'error');
     }
   },
 };
