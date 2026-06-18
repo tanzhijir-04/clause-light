@@ -83,6 +83,75 @@ class ParseResult:
     clauses: list[ClauseItem] = field(default_factory=list)
 
 
+# ── 文本分段 ──
+
+CHUNK_SIZE = 6000  # 每段最大字符数
+
+
+def _chunk_text(text: str) -> list[str]:
+    """
+    按段落边界切分长文本，每段不超过 CHUNK_SIZE 字符。
+
+    切分策略：
+    1. 优先按 "第X条" 等条款标题切分
+    2. 其次按空行（段落间隔）切分
+    3. 最后按固定长度硬切
+    """
+    if len(text) <= CHUNK_SIZE:
+        return [text]
+
+    # 策略1：按条款标题切分（"第X条"、"第X节"、"X." 等）
+    import re
+    # 匹配中文条款编号：第X条、第X节、X.X、X、（X）等
+    splits = re.split(r'(?=(?:第[一二三四五六七八九十百千零\d]+[条章节]|[（(]\s*[一二三四五六七八九十百零\d]+\s*[）)]|\d+\.\d+\s|\d+\.\s))', text)
+
+    chunks = []
+    current = ''
+    for part in splits:
+        if not part.strip():
+            continue
+        if len(current) + len(part) > CHUNK_SIZE and current:
+            chunks.append(current.strip())
+            current = part
+        else:
+            current += part
+    if current.strip():
+        chunks.append(current.strip())
+
+    # 如果策略1 切分后仍有超长段，按空行二次切分
+    final_chunks = []
+    for chunk in chunks:
+        if len(chunk) <= CHUNK_SIZE:
+            final_chunks.append(chunk)
+            continue
+        # 按空行切分
+        paragraphs = chunk.split('\n\n')
+        sub_current = ''
+        for para in paragraphs:
+            if len(sub_current) + len(para) + 2 > CHUNK_SIZE and sub_current:
+                final_chunks.append(sub_current.strip())
+                sub_current = para
+            else:
+                sub_current += ('\n\n' + para if sub_current else para)
+        if sub_current.strip():
+            final_chunks.append(sub_current.strip())
+
+    # 策略3：最终兜底，硬切超长段
+    result = []
+    for chunk in final_chunks:
+        while len(chunk) > CHUNK_SIZE:
+            # 在 CHUNK_SIZE 附近找最近的换行符切分
+            cut_pos = chunk.rfind('\n', 0, CHUNK_SIZE)
+            if cut_pos < CHUNK_SIZE // 2:
+                cut_pos = CHUNK_SIZE
+            result.append(chunk[:cut_pos].strip())
+            chunk = chunk[cut_pos:].strip()
+        if chunk:
+            result.append(chunk)
+
+    return result if result else [text[:CHUNK_SIZE]]
+
+
 # ── Stage 1: 结构解析 ──
 
 async def parse_contract(
@@ -91,10 +160,74 @@ async def parse_contract(
     contract_type_hint: str | None = None,
 ) -> ParseResult:
     """
-    Stage 1: 一次 LLM 调用，完成分类 + 拆解 + 路由决策。
+    Stage 1: 结构解析（分类 + 拆解 + 路由决策）。
+
+    短合同（≤8000字）：一次 LLM 调用完成。
+    长合同（>8000字）：分段解析后合并。
 
     返回 ParseResult，包含合同类型、条款数组、模型路由建议。
     """
+    # 分段处理长合同
+    chunks = _chunk_text(full_text)
+    if len(chunks) > 1:
+        logger.info("合同较长（%d 字），分为 %d 段解析", len(full_text), len(chunks))
+
+    all_clauses: list[ClauseItem] = []
+    contract_type = contract_type_hint or "其他"
+    contract_type_en = TYPE_EN_MAP.get(contract_type, "other")
+    complexity = "standard"
+    recommended_model = "fast"
+
+    for i, chunk in enumerate(chunks):
+        chunk_result = await _parse_single_chunk(
+            chunk, llm, contract_type_hint if i == 0 else contract_type,
+        )
+
+        # 第一段的合同类型最可靠（包含合同头部信息）
+        if i == 0:
+            contract_type = chunk_result.contract_type
+            contract_type_en = chunk_result.contract_type_en
+
+        all_clauses.extend(chunk_result.clauses)
+
+        # 复杂度取最高值
+        if chunk_result.complexity == "complex":
+            complexity = "complex"
+            recommended_model = chunk_result.recommended_model
+
+    # 合并去重（按 id + 标题前 10 字匹配）
+    seen = set()
+    unique_clauses = []
+    for clause in all_clauses:
+        key = (clause.id, clause.title[:10] if clause.title else "")
+        if key not in seen:
+            seen.add(key)
+            unique_clauses.append(clause)
+
+    result = ParseResult(
+        contract_type=contract_type,
+        contract_type_en=contract_type_en,
+        complexity=complexity,
+        recommended_model=recommended_model,
+        clauses=unique_clauses if unique_clauses else [ClauseItem(
+            id="1", type="other", title="全文",
+            text=full_text[:2000], relevance=["general"],
+        )],
+    )
+
+    logger.info(
+        "Stage 1 完成: type=%s complexity=%s clauses=%d (from %d chunks)",
+        result.contract_type, result.complexity, len(result.clauses), len(chunks),
+    )
+    return result
+
+
+async def _parse_single_chunk(
+    text: str,
+    llm: LLMGateway,
+    contract_type_hint: str | None = None,
+) -> ParseResult:
+    """单段文本的结构解析（一次 LLM 调用）"""
 
     system_prompt = (
         "你是一个合同结构解析专家。你的任务是对合同进行三个操作：\n"
@@ -133,7 +266,7 @@ async def parse_contract(
         "}"
     )
 
-    user_content = f"请解析以下合同：\n\n{full_text[:8000]}"
+    user_content = f"请解析以下合同：\n\n{text}"
 
     if contract_type_hint:
         user_content = f"合同类型提示：{contract_type_hint}\n\n{user_content}"
@@ -149,20 +282,12 @@ async def parse_contract(
 
     if not resp.content:
         logger.error("Stage 1 LLM 返回空内容")
-        result.clauses = [ClauseItem(
-            id="1", type="other", title="全文",
-            text=full_text[:2000], relevance=["general"],
-        )]
         return result
 
     parsed = llm.parse_json(resp.content)
 
     if not isinstance(parsed, dict):
-        logger.warning("Stage 1 JSON 解析失败，使用兜底方案")
-        result.clauses = [ClauseItem(
-            id="1", type="other", title="全文",
-            text=full_text[:2000], relevance=["general"],
-        )]
+        logger.warning("Stage 1 JSON 解析失败")
         return result
 
     # 解析合同类型
@@ -198,14 +323,4 @@ async def parse_contract(
             relevance=relevance,
         ))
 
-    if not result.clauses:
-        result.clauses = [ClauseItem(
-            id="1", type="other", title="全文",
-            text=full_text[:2000], relevance=["general"],
-        )]
-
-    logger.info(
-        "Stage 1 完成: type=%s complexity=%s clauses=%d",
-        result.contract_type, result.complexity, len(result.clauses),
-    )
     return result
