@@ -275,3 +275,64 @@ class KnowledgeEngine:
             rule.is_active = False
             rule.updated_at = datetime.now(timezone.utc)
             logger.info("审核拒绝规则: id=%s", rule_id)
+
+    async def trigger_auto_learning(self, clause: ClauseAnalysis) -> dict | None:
+        """
+        从用户"不正确"反馈中自动学习，创建新的待审核规则。
+
+        流程：
+        1. 检查是否已存在相似规则（避免重复）
+        2. 从条款内容中提取关键词
+        3. 创建新的知识规则（source=auto_learned, confidence=0.6）
+        4. 规则进入待审核队列，等待管理员确认
+        """
+        clause_content = (clause.clause_content or "").strip()
+        if not clause_content:
+            logger.info("自动学习跳过：条款内容为空")
+            return None
+
+        # 检查是否已存在包含相同内容的规则（避免重复学习）
+        existing_stmt = select(KnowledgeRule).where(
+            KnowledgeRule.rule_text == clause_content
+        )
+        existing_result = await self.db.execute(existing_stmt)
+        if existing_result.scalar_one_or_none():
+            logger.info("自动学习跳过：规则已存在 clause_id=%s", clause.id)
+            return None
+
+        # 提取关键词（取条款内容的前 20 个字作为触发词）
+        keywords = _extract_keywords(clause_content)
+
+        # 映射风险类型到规则类别
+        category = TYPE_CATEGORY_MAP.get(clause.risk_type, "通用") if clause.risk_type else "通用"
+
+        new_rule = {
+            "category": category,
+            "rule_text": clause_content,
+            "trigger_keywords": keywords,
+            "confidence": 0.6,
+            "source": "auto_learned",
+        }
+
+        result = await self.add_rule(new_rule)
+        logger.info(
+            "自动学习：从反馈创建新规则 clause_id=%s rule_id=%s",
+            clause.id,
+            result["id"],
+        )
+        return result
+
+
+def _extract_keywords(text: str, max_keywords: int = 5) -> list[str]:
+    """
+    从条款文本中提取关键词。
+
+    简单策略：按标点分割，取较短的有意义片段作为关键词。
+    后续可替换为更复杂的 NLP 分词。
+    """
+    # 按常见中文标点分割
+    import re
+    parts = re.split(r"[，。；：、！？\s]+", text)
+    # 过滤空串和过长片段，取前 max_keywords 个
+    keywords = [p.strip() for p in parts if 2 < len(p.strip()) <= 20]
+    return keywords[:max_keywords]

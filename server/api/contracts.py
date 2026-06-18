@@ -301,7 +301,7 @@ async def submit_feedback(
     feedback: str = Form(...),  # correct / incorrect
     db: AsyncSession = Depends(get_db),
 ):
-    """提交用户反馈"""
+    """提交用户反馈，若反馈为"incorrect"则触发自动学习"""
     stmt = select(ClauseAnalysis).where(ClauseAnalysis.id == clause_analysis_id)
     result = await db.execute(stmt)
     clause = result.scalar_one_or_none()
@@ -309,7 +309,21 @@ async def submit_feedback(
         raise HTTPException(status_code=404, detail="条款分析不存在")
 
     clause.user_feedback = feedback
-    return {"success": True}
+
+    # 如果用户认为分析结果"不正确"，触发自动学习管道
+    auto_learned = None
+    if feedback == "incorrect":
+        from server.core.knowledge import KnowledgeEngine
+
+        engine = KnowledgeEngine(db)
+        auto_learned = await engine.trigger_auto_learning(clause)
+
+    await db.commit()
+
+    return {
+        "success": True,
+        "autoLearned": auto_learned is not None,
+    }
 
 
 @router.delete("/{contract_id}")
