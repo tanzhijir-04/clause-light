@@ -16,7 +16,7 @@ const App = (() => {
   let currentParams = {};
 
   /** 渲染指定页面 */
-  async function renderPage(route, params = {}) {
+  async function renderPage(route, params = {}, renderOptions = {}) {
     currentRoute = route;
     currentParams = params;
     const page = pages[route];
@@ -75,11 +75,24 @@ const App = (() => {
 
     // 页面特定的后渲染初始化
     if (page.initToggles) page.initToggles();
+
+    // 恢复搜索输入框焦点（防抖搜索后重新渲染时使用）
+    if (renderOptions.restoreFocus && renderOptions.focusSelector) {
+      requestAnimationFrame(() => {
+        const input = document.querySelector(renderOptions.focusSelector);
+        if (input) {
+          input.focus();
+          // 将光标定位到输入内容末尾
+          const len = input.value ? input.value.length : 0;
+          input.setSelectionRange(len, len);
+        }
+      });
+    }
   }
 
   /** 渲染当前页面（用于状态更新时重新渲染） */
-  function renderCurrentPage() {
-    renderPage(currentRoute, currentParams);
+  function renderCurrentPage(route, params, renderOptions) {
+    renderPage(route || currentRoute, params || currentParams, renderOptions || {});
   }
 
   /** 切换主题 */

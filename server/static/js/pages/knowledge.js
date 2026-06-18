@@ -5,6 +5,7 @@ const KnowledgePage = {
   _tab: 'rules',
   _searchTerm: '',
   _categoryFilter: '',
+  _searchDebounce: null,
 
   async render() {
     const tabs = [
@@ -208,7 +209,11 @@ const KnowledgePage = {
 
   onSearch(value) {
     this._searchTerm = value;
-    App.renderCurrentPage();
+    // 防抖：300ms 内无新输入才执行搜索
+    clearTimeout(this._searchDebounce);
+    this._searchDebounce = setTimeout(() => {
+      App.renderCurrentPage('knowledge', {}, { restoreFocus: true, focusSelector: '.search-input-wrapper input', focusValue: value });
+    }, 300);
   },
 
   onCategoryFilter(value) {

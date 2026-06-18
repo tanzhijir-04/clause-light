@@ -5,6 +5,7 @@ const ContractsPage = {
   _searchTerm: '',
   _typeFilter: '',
   _riskFilter: '',
+  _searchDebounce: null,
 
   async render(params = {}) {
     // 如果有 id 参数，委托给合同详情页渲染
@@ -88,7 +89,11 @@ const ContractsPage = {
 
   onSearch(value) {
     this._searchTerm = value;
-    App.renderCurrentPage();
+    // 防抖：300ms 内无新输入才执行搜索
+    clearTimeout(this._searchDebounce);
+    this._searchDebounce = setTimeout(() => {
+      App.renderCurrentPage('contracts', {}, { restoreFocus: true, focusSelector: '.search-input-wrapper input', focusValue: value });
+    }, 300);
   },
 
   onTypeFilter(value) {
