@@ -12,7 +12,12 @@ from server.core.knowledge import KnowledgeEngine
 from server.core.llm import LLMGateway, get_llm_gateway
 from server.core.ocr import OCREngine, get_ocr_engine
 from server.core.workers.evaluator import EvaluationResult, evaluate
-from server.core.workers.workers import ClauseRisk, analyze_dimension
+from server.core.workers.workers import (
+    ClauseRisk,
+    analyze_dimension,
+    analyze_dimension_with_context,
+    detect_conflicts,
+)
 from server.core.workers.parser import ClauseItem, ParseResult, parse_contract
 
 # 向后兼容：旧代码可能从 agent 模块导入 TYPE_EN_MAP
@@ -130,7 +135,7 @@ class ContractAgent:
         except Exception as e:
             logger.warning("知识库检索失败: %s", e)
 
-        # ── Stage 2: 并行风险评估 ──
+        # ── Stage 2: 并行风险评估（含冲突解决） ──
         total_workers = len(DIMENSIONS)
         await _notify(3, 5, f"正在并行分析 {total_workers} 个维度...")
         logger.info("Stage 2: 并行风险评估 (%d 个 Worker)", total_workers)
@@ -148,6 +153,49 @@ class ContractAgent:
                 logger.warning("Worker[%s] 失败: %s", dim, res)
             elif isinstance(res, list):
                 all_risks.extend(res)
+
+        # ── 冲突检测 + 第二轮带上下文分析 ──
+        conflicts = detect_conflicts(all_risks)
+        if conflicts:
+            logger.info("发现 %d 个冲突条款，启动第二轮分析", len(conflicts))
+            await _notify(3, 5, f"发现 {len(conflicts)} 个维度冲突，正在协调...")
+
+            # 构建条款 id → ClauseItem 的映射
+            clause_map = {c.id: c for c in parse_result.clauses}
+
+            for clause_id, conflict_risks in conflicts.items():
+                clause = clause_map.get(clause_id)
+                if not clause:
+                    continue
+
+                # 构建跨维度上下文摘要
+                cross_context = "\n".join(
+                    f"- {r.risk_type or '未知维度'}: {r.risk_level} — {r.issue}"
+                    for r in conflict_risks
+                )
+
+                # 找到评级最高的维度（red > yellow > green）来重新分析
+                risk_priority = {"red": 3, "yellow": 2, "green": 1}
+                best_risk = max(conflict_risks, key=lambda r: risk_priority.get(r.risk_level, 0))
+                # 从 best_risk 的 risk_type 推断维度
+                resolve_dim = "equity"  # 默认用权责对等维度做最终裁决
+
+                new_risk = await analyze_dimension_with_context(
+                    resolve_dim, clause, self.llm, parse_result.contract_type,
+                    cross_context, kb_rules, kb_laws,
+                )
+
+                if new_risk:
+                    # 用新结果替换冲突中的旧结果
+                    all_risks = [
+                        r for r in all_risks
+                        if not (r.clause_id == clause_id and r.risk_type == best_risk.risk_type)
+                    ]
+                    all_risks.append(new_risk)
+                    logger.info(
+                        "条款 %s 冲突解决: %s → %s",
+                        clause_id, best_risk.risk_level, new_risk.risk_level,
+                    )
 
         # ── Stage 3: 聚合评分 ──
         await _notify(4, 5, "正在聚合评分...")

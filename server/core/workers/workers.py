@@ -198,3 +198,106 @@ async def analyze_dimension(
         sum(1 for r in results if r.risk_level == "green"),
     )
     return results
+
+
+async def analyze_dimension_with_context(
+    dimension: str,
+    clause: ClauseItem,
+    llm: LLMGateway,
+    contract_type: str,
+    cross_context: str,
+    kb_rules: list[str] | None = None,
+    kb_laws: list[dict] | None = None,
+) -> ClauseRisk | None:
+    """
+    带跨维度上下文的单条款分析（用于第二轮冲突解决）。
+
+    cross_context: 其他维度对该条款的评级摘要，注入 prompt 让 LLM 参考。
+    """
+    system_prompt = (
+        f"你是合同审查的{WORKER_DIMENSIONS[dimension]['name']}专家。\n"
+        f"你代表合同的乙方（上传方），从他的利益出发评估风险。\n\n"
+        f"## 特殊说明\n"
+        f"这是第二轮分析。其他维度的专家对该条款有以下评级：\n"
+        f"{cross_context}\n"
+        f"请参考其他维度的意见，结合你自己的专业判断，给出最终评级。\n"
+        f"如果其他维度的评级有道理，请适当调整你的评级。\n"
+        f"如果你认为自己的判断更准确，坚持原评级并在 issue 中说明原因。\n\n"
+        f"## 评级标准\n"
+        f"- red: 条款明确不利于乙方且无对等保护，或违反法律强制性规定\n"
+        f"- yellow: 存在不确定性、行业惯例有争议、或轻微不利于乙方\n"
+        f"- green: 条款标准且对乙方无明显不利\n\n"
+        f"## 输出格式\n"
+        f"只返回 JSON 对象（单个对象，不是数组）：\n"
+        f'{{\n'
+        f'  "clause_id": "条款id",\n'
+        f'  "risk_level": "red/yellow/green",\n'
+        f'  "risk_type": "具体风险类型",\n'
+        f'  "issue": "问题描述（一句话）",\n'
+        f'  "unfavorable_to": "不利方（甲方/乙方/双方）",\n'
+        f'  "severity": 1-10,\n'
+        f'  "suggestion": "具体修改方向或替代表述",\n'
+        f'  "legal_basis": "相关法律依据（如有）"\n'
+        f'}}\n'
+    )
+
+    clauses_input = json.dumps(
+        [{"id": clause.id, "type": clause.type, "title": clause.title, "text": clause.text}],
+        ensure_ascii=False,
+    )
+    user_content = f"合同类型：{contract_type}\n\n条款列表：\n{clauses_input}"
+
+    if kb_rules:
+        user_content += "\n\n相关知识库规则（供参考）：\n" + "\n".join(f"- {r}" for r in kb_rules)
+
+    if kb_laws:
+        user_content += "\n\n相关法律条文（供参考）：\n"
+        for law in kb_laws:
+            user_content += f"- {law.get('law_name', '')} {law.get('article_number', '')}: {law.get('content', '')}\n"
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content},
+    ]
+
+    resp = await llm.chat(messages, task="analysis")
+
+    if not resp.content:
+        return None
+
+    parsed = llm.parse_json(resp.content)
+
+    if not isinstance(parsed, dict):
+        return None
+
+    return ClauseRisk(
+        clause_id=parsed.get("clause_id", clause.id),
+        risk_level=parsed.get("risk_level", "green"),
+        risk_type=parsed.get("risk_type", ""),
+        issue=parsed.get("issue", ""),
+        unfavorable_to=parsed.get("unfavorable_to", ""),
+        severity=parsed.get("severity", 1),
+        suggestion=parsed.get("suggestion", ""),
+        legal_basis=parsed.get("legal_basis", ""),
+    )
+
+
+def detect_conflicts(risks: list[ClauseRisk]) -> dict[str, list[ClauseRisk]]:
+    """
+    检测同一条款在不同维度间的评级冲突。
+
+    返回 {clause_id: [冲突的 ClauseRisk 列表]}，仅包含有冲突的条款。
+    """
+    from collections import defaultdict
+
+    by_clause: dict[str, list[ClauseRisk]] = defaultdict(list)
+    for r in risks:
+        by_clause[r.clause_id].append(r)
+
+    conflicts: dict[str, list[ClauseRisk]] = {}
+    for clause_id, clause_risks in by_clause.items():
+        levels = set(r.risk_level for r in clause_risks)
+        if "red" in levels and "green" in levels:
+            conflicts[clause_id] = clause_risks
+
+    return conflicts
