@@ -35,35 +35,41 @@ class KnowledgeEngine:
         top_k: int = 5,
     ) -> list[str]:
         """
-        检索相关规则。
+        混合检索相关规则（关键词 + 语义向量）。
 
         1. 查询 is_active=1 的规则
         2. 按 category 过滤（通用 + 对应合同类型）
-        3. 关键词匹配
-        4. 按 confidence 降序排序
-        5. 返回 Top K 条规则文本
+        3. 关键词匹配评分
+        4. 如果 embedding 可用，叠加语义相似度评分
+        5. 按综合得分降序排序，返回 Top K
         """
+        from server.core import embedding
+
         category = TYPE_CATEGORY_MAP.get(contract_type, "其他")
 
         stmt = select(KnowledgeRule).where(KnowledgeRule.is_active == True)  # noqa: E712
         result = await self.db.execute(stmt)
         rules = result.scalars().all()
 
-        matched: list[tuple[KnowledgeRule, float]] = []
+        # 过滤出匹配类别的规则
+        filtered = [
+            r for r in rules
+            if r.category == "通用" or r.category == category
+        ]
+
+        if not filtered:
+            return []
+
+        # ── 关键词评分 ──
         query_lower = query.lower()
+        keyword_scores: dict[str, float] = {}
 
-        for rule in rules:
-            # 类别匹配：通用规则始终包含，专业规则按类型过滤
-            if rule.category != "通用" and rule.category != category:
-                continue
-
-            # 关键词匹配评分
+        for rule in filtered:
             score = 0.0
             rule_lower = rule.rule_text.lower()
             if query_lower in rule_lower:
                 score += 2.0
 
-            # 触发关键词匹配
             if rule.trigger_keywords:
                 try:
                     keywords = json.loads(rule.trigger_keywords)
@@ -73,16 +79,63 @@ class KnowledgeEngine:
                 except (json.JSONDecodeError, TypeError):
                     pass
 
-            if score > 0:
-                matched.append((rule, score + rule.confidence))
+            keyword_scores[rule.id] = score
 
-        # 按综合得分降序排序
+        # ── 语义向量评分（如果可用） ──
+        vector_scores: dict[str, float] = {}
+        if embedding.is_available():
+            try:
+                # 编码查询文本
+                query_vec = embedding.encode_single(query)
+                if query_vec is not None:
+                    import numpy as np
+
+                    # 收集有 embedding 的规则
+                    rules_with_vec = []
+                    vecs = []
+                    for rule in filtered:
+                        if rule.embedding:
+                            try:
+                                vec = json.loads(rule.embedding)
+                                if isinstance(vec, list) and len(vec) > 0:
+                                    rules_with_vec.append(rule)
+                                    vecs.append(vec)
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+
+                    if vecs:
+                        corpus_vecs = np.array(vecs, dtype=np.float32)
+                        query_np = np.array(query_vec, dtype=np.float32)
+                        similarities = embedding.batch_similarity(query_np, corpus_vecs)
+
+                        for rule, sim in zip(rules_with_vec, similarities):
+                            vector_scores[rule.id] = float(sim) * 3.0  # 放大向量得分权重
+            except Exception as e:
+                logger.warning("向量检索失败，降级为纯关键词搜索: %s", e)
+
+        # ── 混合评分 ──
+        # α=0.6 关键词 + 0.4 向量（如果向量可用），否则纯关键词
+        has_vectors = bool(vector_scores)
+        alpha = 0.6 if has_vectors else 1.0
+
+        matched: list[tuple[KnowledgeRule, float]] = []
+        for rule in filtered:
+            kw = keyword_scores.get(rule.id, 0.0)
+            vec = vector_scores.get(rule.id, 0.0)
+            final_score = alpha * kw + (1 - alpha) * vec + rule.confidence * 0.1
+            if final_score > 0.1:  # 阈值过滤
+                matched.append((rule, final_score))
+
         matched.sort(key=lambda x: x[1], reverse=True)
 
         # 更新使用次数
         for rule, _ in matched[:top_k]:
             rule.usage_count = (rule.usage_count or 0) + 1
 
+        logger.info(
+            "知识库检索: query='%s' 匹配 %d/%d 条 (向量=%s)",
+            query[:20], len(matched), len(filtered), has_vectors,
+        )
         return [rule.rule_text for rule, _ in matched[:top_k]]
 
     async def add_rule(self, rule_data: dict) -> dict:
