@@ -169,10 +169,13 @@ const ContractDetailPage = {
   _renderAnnotatedText(fullText, clauses) {
     if (!fullText || !clauses.length) return this._escapeHtml(fullText || '');
 
-    // 1. 对每条 clause 定位在 fullText 中的位置
+    // 0. 标准化 OCR 原文，修复乱换行和乱缩进
+    const text = this._normalizeOcrText(fullText);
+
+    // 1. 对每条 clause 定位在标准化后文本中的位置
     const segments = [];
     for (const clause of clauses) {
-      const pos = this._locateClause(fullText, clause);
+      const pos = this._locateClause(text, clause);
       if (pos) {
         segments.push({ start: pos.start, end: pos.end, clause });
       }
@@ -190,20 +193,20 @@ const ContractDetailPage = {
     for (const seg of merged) {
       // 普通文本
       if (seg.start > cursor) {
-        html += this._escapeHtml(fullText.slice(cursor, seg.start));
+        html += this._escapeHtml(text.slice(cursor, seg.start));
       }
       // 高亮文本
-      const text = fullText.slice(seg.start, seg.end);
+      const segText = text.slice(seg.start, seg.end);
       const level = seg.clause.riskLevel;
       const isActive = this._activeClauseId === seg.clause.id;
       const label = seg.clause.clauseNumber || '';
-      html += `<span class="clause-mark ${level} ${isActive ? 'active' : ''}" data-clause-id="${seg.clause.id}" onclick="ContractDetailPage._selectClause('${seg.clause.id}')"><span class="clause-label">${label}</span>${this._escapeHtml(text)}</span>`;
+      html += `<span class="clause-mark ${level} ${isActive ? 'active' : ''}" data-clause-id="${seg.clause.id}" onclick="ContractDetailPage._selectClause('${seg.clause.id}')"><span class="clause-label">${label}</span>${this._escapeHtml(segText)}</span>`;
       cursor = seg.end;
     }
 
     // 剩余文本
-    if (cursor < fullText.length) {
-      html += this._escapeHtml(fullText.slice(cursor));
+    if (cursor < text.length) {
+      html += this._escapeHtml(text.slice(cursor));
     }
 
     return html;
@@ -211,18 +214,25 @@ const ContractDetailPage = {
 
   /** 定位条款在原文中的位置 */
   _locateClause(fullText, clause) {
-    // 策略1：clauseNumber + "\n" + clauseTitle 组合搜索
+    // 策略1：clauseNumber + clauseTitle 组合搜索（标准化后换行变空格）
     if (clause.clauseNumber && clause.clauseTitle) {
-      const anchor = clause.clauseNumber + '\n' + clause.clauseTitle;
-      const idx = fullText.indexOf(anchor);
-      if (idx !== -1) {
-        return { start: idx, end: Math.min(idx + (clause.clauseContent || anchor).length, fullText.length) };
+      const anchors = [
+        clause.clauseNumber + ' ' + clause.clauseTitle,  // 标准化后的格式
+        clause.clauseNumber + '\n' + clause.clauseTitle,  // 原始格式
+      ];
+      for (const anchor of anchors) {
+        const idx = fullText.indexOf(anchor);
+        if (idx !== -1) {
+          const contentLen = clause.clauseContent
+            ? this._normalizeOcrText(clause.clauseContent).length
+            : anchor.length;
+          return { start: idx, end: Math.min(idx + contentLen, fullText.length) };
+        }
       }
     }
 
-    // 策略2：clauseNumber 搜索（可能原文中换行符不同）
+    // 策略2：clauseNumber 搜索
     if (clause.clauseNumber) {
-      // 尝试多种编号格式：纯数字、中文数字 + 可能的空格/换行
       const numPatterns = [
         clause.clauseNumber,
         clause.clauseNumber.replace(/\s+/g, ''),
@@ -230,23 +240,22 @@ const ContractDetailPage = {
       for (const pat of numPatterns) {
         const idx = fullText.indexOf(pat);
         if (idx !== -1) {
-          const contentLen = clause.clauseContent ? clause.clauseContent.length : 200;
+          const contentLen = clause.clauseContent
+            ? this._normalizeOcrText(clause.clauseContent).length
+            : 200;
           return { start: idx, end: Math.min(idx + contentLen, fullText.length) };
         }
       }
     }
 
-    // 策略3：clauseContent 前 30 字符子串匹配
+    // 策略3：clauseContent 前 30 字符子串匹配（忽略空白差异）
     if (clause.clauseContent && clause.clauseContent.length >= 10) {
-      const snippet = clause.clauseContent.slice(0, 30).replace(/\s+/g, '');
-      // 在 fullText 中搜索（忽略空白差异）
-      const cleanText = fullText.replace(/\s+/g, ' ');
-      const cleanSnippet = snippet.replace(/\s+/g, ' ');
-      const idx = cleanText.indexOf(cleanSnippet);
+      // 将 clauseContent 标准化后搜索，避免空白差异导致索引偏移
+      const normalizedContent = this._normalizeOcrText(clause.clauseContent);
+      const snippet = normalizedContent.slice(0, 30);
+      const idx = fullText.indexOf(snippet);
       if (idx !== -1) {
-        // 映射回原始文本位置（近似）
-        const contentLen = clause.clauseContent.length;
-        return { start: idx, end: Math.min(idx + contentLen, fullText.length) };
+        return { start: idx, end: Math.min(idx + normalizedContent.length, fullText.length) };
       }
     }
 
@@ -292,6 +301,21 @@ const ContractDetailPage = {
   /** HTML 转义（委托给全局 Components.escapeHtml） */
   _escapeHtml(str) {
     return Components.escapeHtml(str);
+  },
+
+  /**
+   * 标准化 OCR 原文：修复乱换行和乱缩进
+   * - 2+ 连续换行 → 段落分隔（保留）
+   * - 单换行（行内）→ 合并为空格（OCR 断行）
+   * - 多个空格 → 单个空格
+   */
+  _normalizeOcrText(text) {
+    if (!text) return '';
+    return text
+      .replace(/\n{3,}/g, '\n\n')   // 最多保留两个换行（段落间隔）
+      .replace(/([^\n])\n([^\n])/g, '$1 $2')  // 单换行→空格（行内断行）
+      .replace(/ {2,}/g, ' ')        // 多空格→单空格
+      .trim();
   },
 
   // ── 批注面板渲染 ──

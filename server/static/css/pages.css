@@ -157,7 +157,8 @@
 /* 原文区域 */
 .original-text {
   flex: 1; overflow-y: auto; padding: 24px 32px;
-  font-size: 15px; line-height: 1.9; white-space: pre-wrap; scroll-behavior: smooth;
+  font-size: 15px; line-height: 1.9; white-space: normal; scroll-behavior: smooth;
+  word-break: break-word;
 }
 
 /* 条款高亮标记 */
