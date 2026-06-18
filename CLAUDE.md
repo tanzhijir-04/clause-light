@@ -21,14 +21,21 @@ ClauseLight（合同红绿灯）是一个开源合同风险审查工具。
 - **WebSocket**：FastAPI 原生 WebSocket
 - **前端管理面板**：纯 HTML + CSS + JS，无框架
 
-### 手机端（React Native）
-- **应用形态**：React Native（Expo managed workflow）
+### 手机端（React Native PWA）
+- **应用形态**：React Native（Expo managed workflow）+ PWA
 - **前端**：React Native + TypeScript
 - **OCR**：不本地运行，发送给电脑端或云端
 - **Embedding**：不本地运行，调用电脑端 API
 - **本地存储**：AsyncStorage
 - **通信**：WebSocket + HTTP API
 - **UI 风格**：移动端优先、简洁、红黄绿色彩编码
+
+> ⚠️ **重要：mobile 目录是完全独立的 PWA 项目**
+> - `mobile/` 目录与 `server/static/`（电脑版管理面板）**完全隔离**，不能混用代码
+> - 手机端是独立的 React Native + TypeScript 项目，有自己的依赖、构建流程和部署方式
+> - 电脑版是纯 HTML/CSS/JS，无框架，通过浏览器访问
+> - 两者共享的只有 `shared/` 目录下的 JSON 数据文件和后端 API
+> - **修改 mobile 代码时，不要影响 server/static/；修改电脑版时，不要影响 mobile/**
 
 ### 共享
 - **规则库**：JSON 文件（shared/rules/）
