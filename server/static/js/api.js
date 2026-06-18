@@ -51,6 +51,62 @@ const API = (() => {
       // 不设置 Content-Type，让浏览器自动设置 multipart/form-data boundary
       return _fetch('/api/contracts/analyze', { method: 'POST', body: form, headers: {} });
     },
+    /**
+     * 流式分析合同（SSE），返回 { onProgress, onResult, onError, done }
+     * @param {File} file - 要上传的文件
+     * @param {object} callbacks - { onProgress(step, total, message), onResult(data), onError(message) }
+     */
+    analyzeStream(file, callbacks = {}) {
+      const form = new FormData();
+      form.append('file', file);
+      const ctrl = new AbortController();
+
+      fetch('/api/contracts/analyze', {
+        method: 'POST',
+        body: form,
+        signal: ctrl.signal,
+      }).then(async res => {
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: res.statusText }));
+          throw new Error(err.detail || `请求失败 (${res.status})`);
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          // 按行解析 SSE 事件
+          const lines = buffer.split('\n');
+          buffer = lines.pop(); // 保留未完成的行
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                if (data.type === 'progress' && callbacks.onProgress) {
+                  callbacks.onProgress(data.step, data.total, data.message);
+                } else if (data.type === 'result' && callbacks.onResult) {
+                  callbacks.onResult(data);
+                } else if (data.type === 'error' && callbacks.onError) {
+                  callbacks.onError(data.message);
+                }
+              } catch (e) {
+                console.warn('SSE 解析失败:', line);
+              }
+            }
+          }
+        }
+      }).catch(err => {
+        if (err.name !== 'AbortError' && callbacks.onError) {
+          callbacks.onError(err.message);
+        }
+      });
+
+      return { abort: () => ctrl.abort() };
+    },
     async feedback(contractId, clauseAnalysisId, feedback) {
       const form = new URLSearchParams({ clause_analysis_id: clauseAnalysisId, feedback });
       return _fetch(`/api/contracts/${contractId}/feedback`, {

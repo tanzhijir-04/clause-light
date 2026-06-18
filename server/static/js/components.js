@@ -114,36 +114,51 @@ const Components = (() => {
     if (uploadZone) {
       uploadZone.innerHTML = `
         <div class="spinner"></div>
-        <div class="upload-zone-title">正在分析合同...</div>
-        <div class="upload-zone-hint">OCR 识别 + AI 分析中，预计 30~60 秒</div>
+        <div class="upload-zone-title" id="upload-progress-title">正在上传...</div>
+        <div class="upload-zone-hint" id="upload-progress-hint">请稍候</div>
+        <div style="margin-top:12px;width:200px;height:4px;background:var(--border-default);border-radius:2px;overflow:hidden">
+          <div id="upload-progress-bar" style="width:0%;height:100%;background:var(--accent);border-radius:2px;transition:width .3s"></div>
+        </div>
       `;
     }
 
     // 同时显示全局 toast
     toast('正在分析：' + file.name + '，请稍候...', 'info', 5000);
 
-    API.contracts.analyze(file)
-      .then(res => {
-        if (res && res.success) {
+    const progressSteps = {
+      1: 'OCR 文字识别',
+      2: '合同结构解析',
+      3: '风险维度分析',
+      4: '聚合评分',
+      5: '生成报告',
+    };
+
+    API.contracts.analyzeStream(file, {
+      onProgress(step, total, message) {
+        const pct = Math.round((step / total) * 100);
+        const titleEl = document.getElementById('upload-progress-title');
+        const hintEl = document.getElementById('upload-progress-hint');
+        const barEl = document.getElementById('upload-progress-bar');
+        if (titleEl) titleEl.textContent = message || (progressSteps[`step`] || '分析中...');
+        if (hintEl) hintEl.textContent = `步骤 ${step}/${total}`;
+        if (barEl) barEl.style.width = pct + '%';
+      },
+      onResult(data) {
+        if (data.contractId) {
           toast('分析完成！正在跳转...', 'success', 2000);
-          // 跳转到合同详情页
           setTimeout(() => {
-            Router.navigate('contracts/' + res.contractId);
+            Router.navigate('contracts/' + data.contractId);
           }, 500);
-        } else {
-          // 问题 5 修复：后端返回 success:false + error
-          const errMsg = res?.error || res?.detail || '未知错误';
-          toast('分析失败：' + errMsg, 'error', 6000);
-          if (uploadZone) uploadZone.innerHTML = originalContent;
         }
-      })
-      .catch(err => {
-        toast('上传失败：' + err.message, 'error', 6000);
+      },
+      onError(message) {
+        toast('分析失败：' + message, 'error', 6000);
         if (uploadZone) uploadZone.innerHTML = originalContent;
-      })
-      .finally(() => {
-        input.value = '';
-      });
+      },
+    });
+
+    // 重置 file input
+    input.value = '';
   }
 
   /** 侧边栏 */

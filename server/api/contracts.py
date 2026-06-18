@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -9,7 +10,8 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from sqlalchemy import delete, func, or_, select
+from fastapi.responses import StreamingResponse
+from sqlalchemy import delete, func, or_, select, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.config import TYPE_EN_MAP, settings
@@ -21,6 +23,7 @@ from server.models.database import (
     AsyncSession,
     ClauseAnalysis,
     Contract,
+    async_session_factory,
     get_db,
 )
 
@@ -185,7 +188,7 @@ async def analyze_contract(
     contract_type: str = Form(default=""),
     db: AsyncSession = Depends(get_db),
 ):
-    """上传并分析合同"""
+    """上传并分析合同（SSE 流式返回进度）"""
     # 验证文件
     if not file.filename:
         raise HTTPException(status_code=400, detail="文件名为空")
@@ -206,92 +209,131 @@ async def analyze_contract(
     with open(file_path, "wb") as f:
         f.write(content)
 
-    # 创建合同记录
-    contract = Contract(
-        id=file_id,
-        title=os.path.splitext(file.filename)[0],
-        type=contract_type or "其他",
-        source_file=file_path,
-    )
-    db.add(contract)
-    await db.flush()
-
-    # 执行 7 步分析
-    agent = ContractAgent()
-    try:
-        result = await agent.analyze(
-            file_path=file_path,
-            contract_type_hint=contract_type if contract_type else None,
+    # 创建合同记录（使用独立 session，不依赖请求级 session）
+    contract_id = file_id
+    contract_title = os.path.splitext(file.filename)[0]
+    async with async_session_factory() as session:
+        contract = Contract(
+            id=contract_id,
+            title=contract_title,
+            type=contract_type or "其他",
+            source_file=file_path,
         )
-    except Exception as e:
-        logger.error("合同分析异常: %s", e)
-        await db.commit()
-        return {
-            "success": False,
-            "contractId": contract.id,
-            "error": f"合同分析异常: {str(e)}",
-        }
+        session.add(contract)
+        await session.commit()
 
-    # 检查分析是否失败（问题 5 修复：不再返回 success:true + score:0）
-    if result.error:
-        logger.warning("合同分析失败: %s", result.error)
-        await db.commit()
-        return {
-            "success": False,
-            "contractId": contract.id,
-            "error": result.error,
-        }
+    async def event_stream():
+        """SSE 事件流：进度推送 + 最终结果"""
+        agent = ContractAgent()
+        progress_queue: asyncio.Queue = asyncio.Queue()
 
-    # 保存 OCR 原文到合同记录（用于原文标注视图）
-    if result.ocr_text:
-        contract.ocr_text = result.ocr_text
+        async def on_progress(step: int, total: int, message: str) -> None:
+            """Agent 回调：将进度事件放入队列"""
+            await progress_queue.put({"type": "progress", "step": step, "total": total, "message": message})
 
-    # 保存分析结果
-    if result.contract_id:
-        analysis = Analysis(
-            id=result.contract_id,
-            contract_id=contract.id,
-            model_used=result.model_used,
-            overall_score=result.overall_score,
-            summary=result.summary,
-            recommendation=result.recommendation,
-            raw_result=json.dumps({"clauses": result.clauses}, ensure_ascii=False),
-            source="local",
-        )
-        db.add(analysis)
+        async def run_agent():
+            """在后台运行 Agent，完成后放入结束标记"""
+            try:
+                return await agent.analyze(
+                    file_path=file_path,
+                    contract_type_hint=contract_type if contract_type else None,
+                    on_step=on_progress,
+                )
+            except Exception as e:
+                logger.error("Agent 分析异常: %s", e)
+                return type('obj', (object,), {'error': f'合同分析异常: {e}', 'ocr_text': '', 'contract_id': ''})()
+            finally:
+                await progress_queue.put(None)  # 结束标记
 
-        # 保存条款分析
-        for clause in result.clauses:
-            clause_analysis = ClauseAnalysis(
-                id=uuid.uuid4().hex,
-                analysis_id=analysis.id,
-                clause_number=clause.get("clause_number", ""),
-                clause_title=clause.get("title", ""),
-                clause_content=clause.get("content", ""),
-                risk_level=clause.get("risk_level", "green"),
-                risk_type=clause.get("risk_type", ""),
-                risk_summary=clause.get("risk_summary", ""),
-                plain_explanation=clause.get("plain_explanation", ""),
-                legal_basis=clause.get("legal_basis", ""),
-                severity_score=clause.get("severity_score", 1),
-                suggested_clause=clause.get("suggested_clause", ""),
-                can_negotiate=clause.get("can_negotiate", False),
-            )
-            db.add(clause_analysis)
+        # 启动 Agent 任务
+        agent_task = asyncio.create_task(run_agent())
 
-        # 更新合同标题和类型
-        contract.type = result.contract_type
-        contract.updated_at = datetime.now(timezone.utc)
+        # 从队列中消费进度事件并推送
+        try:
+            while True:
+                event = await progress_queue.get()
+                if event is None:
+                    break
+                yield _sse_event(event)
+        except asyncio.CancelledError:
+            agent_task.cancel()
+            return
 
-    # 显式提交，确保合同记录和分析结果都持久化
-    await db.commit()
+        # 等待 Agent 完成并获取结果
+        result = await agent_task
 
-    return {
-        "success": True,
-        "contractId": contract.id,
-        "score": result.overall_score,
-        "riskLevel": "red" if result.red_count > 0 else ("yellow" if result.yellow_count > 0 else "green"),
-    }
+        # 分析失败
+        if result.error:
+            logger.warning("合同分析失败: %s", result.error)
+            yield _sse_event({"type": "error", "message": result.error})
+            return
+
+        # 保存结果到数据库（使用独立 session，不依赖请求级 session）
+        try:
+            async with async_session_factory() as session:
+                # 更新合同记录
+                await session.execute(
+                    sa_update(Contract)
+                    .where(Contract.id == contract_id)
+                    .values(
+                        ocr_text=result.ocr_text or "",
+                        type=result.contract_type,
+                        updated_at=datetime.now(timezone.utc),
+                    )
+                )
+
+                # 保存分析结果
+                if result.contract_id:
+                    analysis = Analysis(
+                        id=result.contract_id,
+                        contract_id=contract_id,
+                        model_used=result.model_used,
+                        overall_score=result.overall_score,
+                        summary=result.summary,
+                        recommendation=result.recommendation,
+                        raw_result=json.dumps({"clauses": result.clauses}, ensure_ascii=False),
+                        source="local",
+                    )
+                    session.add(analysis)
+
+                    for clause in result.clauses:
+                        clause_analysis = ClauseAnalysis(
+                            id=uuid.uuid4().hex,
+                            analysis_id=analysis.id,
+                            clause_number=clause.get("clause_number", ""),
+                            clause_title=clause.get("title", ""),
+                            clause_content=clause.get("content", ""),
+                            risk_level=clause.get("risk_level", "green"),
+                            risk_type=clause.get("risk_type", ""),
+                            risk_summary=clause.get("risk_summary", ""),
+                            plain_explanation=clause.get("plain_explanation", ""),
+                            legal_basis=clause.get("legal_basis", ""),
+                            severity_score=clause.get("severity_score", 1),
+                            suggested_clause=clause.get("suggested_clause", ""),
+                            can_negotiate=clause.get("can_negotiate", False),
+                        )
+                        session.add(clause_analysis)
+
+                await session.commit()
+        except Exception as e:
+            logger.error("保存分析结果失败: %s", e)
+            yield _sse_event({"type": "error", "message": f"结果保存失败: {e}"})
+            return
+
+        # 推送最终结果
+        yield _sse_event({
+            "type": "result",
+            "contractId": contract_id,
+            "score": result.overall_score,
+            "riskLevel": "red" if result.red_count > 0 else ("yellow" if result.yellow_count > 0 else "green"),
+        })
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+def _sse_event(data: dict) -> str:
+    """格式化 SSE 事件"""
+    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 @router.post("/{contract_id}/feedback")
