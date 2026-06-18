@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     OCR_MODEL_DIR: str = "data/models/paddleocr"
     OCR_AUTO_DOWNLOAD: bool = True
 
+    # ── 认证 ──
+    API_KEY: str = ""  # 空字符串表示禁用认证，设置后所有 API 请求需携带 X-API-Key 头
+
     # ── 同步 ──
     SYNC_ENABLED: bool = False
     WEBDAV_URL: str = ""

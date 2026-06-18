@@ -126,6 +126,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── 认证中间件 ──
+
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from server.core.auth import auth_middleware
+
+app.add_middleware(BaseHTTPMiddleware, dispatch=auth_middleware)
+
 # ── 请求日志 ──
 
 
