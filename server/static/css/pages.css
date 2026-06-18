@@ -166,18 +166,28 @@
   border-left: 3px solid transparent; padding-left: 12px;
   margin-left: -3px; border-radius: 0 4px 4px 0;
 }
-.clause-mark.red { background: rgba(229, 62, 62, 0.12); border-left-color: var(--risk-red); }
-.clause-mark.yellow { background: rgba(214, 158, 46, 0.10); border-left-color: var(--risk-yellow); }
-.clause-mark:hover { filter: brightness(0.95); }
-.clause-mark.active { box-shadow: 0 0 0 2px var(--accent); z-index: 1; position: relative; }
+/* PRD: 红色 15% 背景 + 3px 左边框 */
+.clause-mark.red { background: rgba(229, 62, 62, 0.15); border-left-color: var(--risk-red); }
+/* PRD: 黄色 12% 背景 + 3px 左边框 */
+.clause-mark.yellow { background: rgba(214, 158, 46, 0.12); border-left-color: var(--risk-yellow); }
+/* PRD: 绿色不高亮，保持原文干净，仅显示左边框 */
+.clause-mark.green { border-left-color: var(--risk-green); }
+.clause-mark:hover { filter: brightness(0.93); }
+/* 选中状态：用加深背景 + 左边框加粗代替蓝色 box-shadow，避免与红/黄背景冲突 */
+.clause-mark.active { z-index: 1; position: relative; border-left-width: 4px; }
+.clause-mark.red.active { background: rgba(229, 62, 62, 0.22); }
+.clause-mark.yellow.active { background: rgba(214, 158, 46, 0.18); }
+.clause-mark.green.active { background: rgba(34, 197, 94, 0.10); }
+/* 条款编号标签：定位在左上角，避免与上方文本重叠 */
 .clause-mark .clause-label {
-  position: absolute; top: -10px; right: 8px;
+  position: absolute; top: 2px; left: 8px;
   font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: var(--radius-full);
-  opacity: 0; transition: opacity .15s; pointer-events: none;
+  opacity: 0; transition: opacity .15s; pointer-events: none; white-space: nowrap;
 }
 .clause-mark:hover .clause-label, .clause-mark.active .clause-label { opacity: 1; }
 .clause-mark.red .clause-label { background: var(--risk-red); color: #fff; }
 .clause-mark.yellow .clause-label { background: var(--risk-yellow); color: #fff; }
+.clause-mark.green .clause-label { background: var(--risk-green); color: #fff; }
 
 /* 批注面板 */
 .annotation-panel {
