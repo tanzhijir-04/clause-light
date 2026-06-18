@@ -8,7 +8,6 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeContext } from '../contexts/ThemeContext';
 import { useToastContext } from '../contexts/ToastContext';
@@ -103,21 +102,21 @@ export default function ResultScreen({ navigation, route }: ResultScreenProps) {
 
   if (loading) {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
         <TopBar title="分析结果" showBack onBack={() => navigation.goBack()} />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.accent} />
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   if (error || !contract) {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
         <TopBar title="分析结果" showBack onBack={() => navigation.goBack()} />
         <EmptyState text={error || '加载失败'} />
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -127,7 +126,7 @@ export default function ResultScreen({ navigation, route }: ResultScreenProps) {
   }));
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <TopBar title="分析结果" showBack onBack={() => navigation.goBack()} />
 
       <ScrollView contentContainerStyle={styles.content}>
@@ -181,7 +180,7 @@ export default function ResultScreen({ navigation, route }: ResultScreenProps) {
           <Text style={[styles.bottomButtonText, { color: colors.text }]}>重新分析</Text>
         </TouchableOpacity>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 

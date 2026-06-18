@@ -8,7 +8,6 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeContext } from '../contexts/ThemeContext';
 import { useConnectionContext, type ConnectionMode } from '../contexts/ConnectionContext';
@@ -72,7 +71,7 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <TopBar title="设置" />
 
       <ScrollView contentContainerStyle={styles.content}>
@@ -242,7 +241,7 @@ export default function SettingsScreen({ navigation }: SettingsScreenProps) {
         onCancel={() => setShowClearDialog(false)}
         confirmText="清除"
       />
-    </SafeAreaView>
+    </View>
   );
 }
 

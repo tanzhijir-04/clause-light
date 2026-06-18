@@ -6,7 +6,6 @@ import {
   ActivityIndicator,
   StyleSheet,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useThemeContext } from '../contexts/ThemeContext';
 import { useConnectionContext } from '../contexts/ConnectionContext';
 import { useToastContext } from '../contexts/ToastContext';
@@ -159,7 +158,7 @@ export default function AnalysisScreen({ navigation, route }: AnalysisScreenProp
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <TopBar title="分析中" showBack onBack={handleBack} />
 
       <ScrollView contentContainerStyle={styles.content}>
@@ -220,7 +219,7 @@ export default function AnalysisScreen({ navigation, route }: AnalysisScreenProp
         onCancel={() => setShowLeaveDialog(false)}
         confirmText="离开"
       />
-    </SafeAreaView>
+    </View>
   );
 }
 

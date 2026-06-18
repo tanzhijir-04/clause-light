@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, SectionList, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useThemeContext } from '../contexts/ThemeContext';
 import { spacing, fontSize } from '../theme';
 import TopBar from '../components/TopBar';
@@ -68,7 +67,7 @@ export default function HistoryScreen({ navigation }: HistoryScreenProps) {
   }, [filteredContracts]);
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <TopBar title="历史记录" />
 
       <View style={styles.content}>
@@ -110,7 +109,7 @@ export default function HistoryScreen({ navigation }: HistoryScreenProps) {
           stickySectionHeadersEnabled={false}
         />
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
