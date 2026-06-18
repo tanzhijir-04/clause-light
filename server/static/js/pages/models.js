@@ -101,26 +101,55 @@ const ModelsPage = {
   async _renderLLMStatus() {
     try {
       const llm = await API.settings.llm();
-      const remoteOk = llm.remote?.enabled !== false && llm.remote?.apiKey;
-      const localOk = llm.local?.enabled === true;
+      const remote = llm.remote || {};
+      const local = llm.local || {};
+
+      // 远程 LLM 状态
+      let remoteStatus = '';
+      if (!remote.apiKey) {
+        remoteStatus = '<span style="color:var(--text-tertiary)">未配置 API Key</span>';
+      } else {
+        const providerName = ModelsPage._getProviderName(remote.provider);
+        remoteStatus = `<span style="color:var(--risk-green)">✓ 已配置</span> <span style="color:var(--text-tertiary)">(${providerName})</span>`;
+      }
+
+      // 本地 LLM 状态
+      let localStatus = '';
+      if (local.enabled) {
+        localStatus = '<span style="color:var(--risk-green)">✓ 已启用</span>';
+      } else {
+        localStatus = '<span style="color:var(--text-tertiary)">未启用</span>';
+      }
+
       return `
         <div style="display:flex;gap:var(--sp-6);font-size:var(--text-sm)">
           <div>
-            <span style="color:var(--text-tertiary)">DeepSeek:</span>
-            ${remoteOk
-              ? ' <span style="color:var(--risk-green)">✓ 已配置</span>'
-              : ' <span style="color:var(--text-tertiary)">✗ 未配置</span>'}
+            <span style="color:var(--text-tertiary)">远程 LLM:</span>
+            ${remoteStatus}
           </div>
           <div>
-            <span style="color:var(--text-tertiary)">Ollama:</span>
-            ${localOk
-              ? ' <span style="color:var(--risk-green)">✓ 已启用</span>'
-              : ' <span style="color:var(--text-tertiary)">✗ 未启用</span>'}
+            <span style="color:var(--text-tertiary)">本地 LLM (Ollama):</span>
+            ${localStatus}
           </div>
         </div>`;
     } catch {
       return '<div style="font-size:var(--text-xs);color:var(--text-tertiary)">无法获取 LLM 配置</div>';
     }
+  },
+
+  /** 根据 provider 代码获取显示名称 */
+  _getProviderName(provider) {
+    const names = {
+      'openai': 'OpenAI',
+      'deepseek': 'DeepSeek',
+      'qwen': '通义千问',
+      'zhipu': '智谱',
+      'moonshot': 'Moonshot',
+      'minimax': 'MiniMax',
+      'baichuan': '百川',
+      'yi': '零一万物',
+    };
+    return names[provider] || provider || 'OpenAI 兼容';
   },
 
   /** 下载单个模型 */
