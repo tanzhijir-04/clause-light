@@ -32,6 +32,11 @@ data/uploads/
 # 日志
 *.log
 
+# 测试覆盖率报告
+htmlcov/
+.coverage
+.coverage.*
+
 软件著作权申请资料/
 
 # Node
