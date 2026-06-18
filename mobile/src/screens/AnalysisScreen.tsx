@@ -82,6 +82,9 @@ export default function AnalysisScreen({ navigation, route }: AnalysisScreenProp
           setIsComplete(true);
           setIsAnalyzing(false);
           saveToHistory(msg.data);
+        } else if (msg.type === 'error') {
+          setError(msg.message);
+          setIsAnalyzing(false);
         }
       },
       () => {

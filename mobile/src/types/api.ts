@@ -92,6 +92,7 @@ export interface KnowledgeStats {
 export type WSMessage =
   | { type: 'progress'; step: number; total: number; message: string }
   | { type: 'result'; data: WSResultData }
+  | { type: 'error'; message: string; code?: string }
   | { type: 'pong' };
 
 export interface WSResultData {

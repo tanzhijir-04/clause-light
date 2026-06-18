@@ -72,6 +72,20 @@ async def websocket_client(websocket: WebSocket):
                     f.write(contract_text)
 
                 try:
+                    # 校验输入文本
+                    if not contract_text.strip():
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "合同文本不能为空",
+                            "code": "EMPTY_TEXT",
+                        })
+                        # 清理临时文件
+                        try:
+                            os.remove(temp_file)
+                        except OSError:
+                            pass
+                        continue
+
                     # 定义进度回调
                     async def on_progress(step: int, total: int, message: str):
                         try:
@@ -174,6 +188,18 @@ async def websocket_client(websocket: WebSocket):
                             ],
                         },
                     })
+                except Exception as e:
+                    # 分析失败时发送错误消息到手机端，避免手机端无限等待
+                    error_msg = str(e)
+                    logger.error("合同分析失败: %s", error_msg)
+                    try:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": f"分析失败: {error_msg}",
+                            "code": "ANALYSIS_FAILED",
+                        })
+                    except Exception:
+                        pass
                 finally:
                     # 清理临时文件
                     try:
