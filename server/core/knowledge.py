@@ -276,6 +276,75 @@ class KnowledgeEngine:
             rule.updated_at = datetime.now(timezone.utc)
             logger.info("审核拒绝规则: id=%s", rule_id)
 
+    async def search_laws(
+        self,
+        clause_text: str,
+        contract_type: str = "",
+        top_k: int = 3,
+    ) -> list[dict]:
+        """
+        检索与条款内容相关的法律条文。
+
+        匹配策略：
+        1. 按标签匹配（优先）
+        2. 按内容关键词匹配
+        返回 top_k 条最相关的法条。
+        """
+        stmt = select(LegalReference)
+        result = await self.db.execute(stmt)
+        refs = result.scalars().all()
+
+        if not refs:
+            return []
+
+        scored: list[tuple[LegalReference, float]] = []
+        text_lower = clause_text.lower()
+
+        for ref in refs:
+            score = 0.0
+
+            # 标签匹配
+            if ref.tags:
+                try:
+                    tags = json.loads(ref.tags)
+                    for tag in tags:
+                        if tag.lower() in text_lower:
+                            score += 3.0
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # 内容关键词匹配（法条名称 + 条文内容中的关键词）
+            if ref.content and ref.content.lower() in text_lower:
+                score += 2.0
+            if ref.article_number and ref.article_number in clause_text:
+                score += 1.0
+
+            # 合同类型相关的法律优先（如劳动合同用劳动合同法）
+            if contract_type:
+                type_law_map = {
+                    "劳动合同": "劳动合同法",
+                    "租赁合同": "民法典",
+                    "装修合同": "民法典",
+                    "借款合同": "民法典",
+                }
+                expected_law = type_law_map.get(contract_type, "")
+                if expected_law and expected_law in (ref.law_name or ""):
+                    score += 1.0
+
+            if score > 0:
+                scored.append((ref, score))
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+
+        return [
+            {
+                "law_name": ref.law_name,
+                "article_number": ref.article_number,
+                "content": ref.content,
+            }
+            for ref, _ in scored[:top_k]
+        ]
+
     async def trigger_auto_learning(self, clause: ClauseAnalysis) -> dict | None:
         """
         从用户"不正确"反馈中自动学习，创建新的待审核规则。

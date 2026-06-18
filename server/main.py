@@ -106,6 +106,38 @@ async def _init_default_rules():
 
                 await db.commit()
 
+        # 如果法规库为空，导入默认法规
+        from server.models.database import LegalReference
+
+        law_count_stmt = select(func.count()).select_from(LegalReference)
+        law_count = (await db.execute(law_count_stmt)).scalar() or 0
+
+        if law_count == 0:
+            logger.info("法规库为空，导入默认法规...")
+            laws_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "shared", "laws")
+            if os.path.isdir(laws_dir):
+                for filename in os.listdir(laws_dir):
+                    if not filename.endswith(".json"):
+                        continue
+                    filepath = os.path.join(laws_dir, filename)
+                    try:
+                        with open(filepath, "r", encoding="utf-8") as f:
+                            laws_data = json.load(f)
+                        for law in laws_data:
+                            ref = LegalReference(
+                                law_name=law["law_name"],
+                                article_number=law.get("article_number", ""),
+                                content=law.get("content", ""),
+                                effective_date=law.get("effective_date"),
+                                tags=json.dumps(law.get("tags", []), ensure_ascii=False),
+                            )
+                            db.add(ref)
+                        logger.info("导入法规: %s (%d 条)", filename, len(laws_data))
+                    except Exception as e:
+                        logger.warning("导入法规失败 %s: %s", filename, e)
+
+                await db.commit()
+
 
 # ── 创建 App ──
 

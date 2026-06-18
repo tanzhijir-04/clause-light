@@ -120,6 +120,7 @@ async def analyze_dimension(
     llm: LLMGateway,
     contract_type: str,
     kb_rules: list[str] | None = None,
+    kb_laws: list[dict] | None = None,
 ) -> list[ClauseRisk]:
     """
     单个维度的 Worker：分析一批条款的风险。
@@ -145,6 +146,11 @@ async def analyze_dimension(
 
     if kb_rules:
         user_content += "\n\n相关知识库规则（供参考）：\n" + "\n".join(f"- {r}" for r in kb_rules)
+
+    if kb_laws:
+        user_content += "\n\n相关法律条文（供参考）：\n"
+        for law in kb_laws:
+            user_content += f"- {law.get('law_name', '')} {law.get('article_number', '')}: {law.get('content', '')}\n"
 
     messages = [
         {"role": "system", "content": system_prompt},

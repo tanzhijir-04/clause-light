@@ -121,10 +121,12 @@ class ContractAgent:
 
         # ── 知识库检索 ──
         kb_rules: list[str] = []
+        kb_laws: list[dict] = []
         try:
             async with async_session_factory() as db:
                 knowledge = KnowledgeEngine(db)
                 kb_rules = await knowledge.search(full_text[:500], parse_result.contract_type)
+                kb_laws = await knowledge.search_laws(full_text[:500], parse_result.contract_type)
         except Exception as e:
             logger.warning("知识库检索失败: %s", e)
 
@@ -134,7 +136,7 @@ class ContractAgent:
         logger.info("Stage 2: 并行风险评估 (%d 个 Worker)", total_workers)
 
         worker_tasks = [
-            analyze_dimension(dim, parse_result.clauses, self.llm, parse_result.contract_type, kb_rules)
+            analyze_dimension(dim, parse_result.clauses, self.llm, parse_result.contract_type, kb_rules, kb_laws)
             for dim in DIMENSIONS
         ]
         worker_results = await asyncio.gather(*worker_tasks, return_exceptions=True)
