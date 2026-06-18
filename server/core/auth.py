@@ -21,9 +21,9 @@ _EXEMPT_PATHS: set[str] = {
 
 _EXEMPT_PREFIXES: tuple[str, ...] = (
     "/static",
-    "/admin",
     "/mobile",
     "/asset",
+    "/ws",
 )
 
 

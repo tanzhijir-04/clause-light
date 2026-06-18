@@ -8,7 +8,13 @@ import pytest
 from sqlalchemy import select
 
 from server.core.knowledge import KnowledgeEngine
-from server.models.database import KnowledgeRule, LegalReference
+from server.models.database import (
+    Analysis,
+    ClauseAnalysis,
+    Contract,
+    KnowledgeRule,
+    LegalReference,
+)
 
 
 class TestKnowledgeSearch:
@@ -482,3 +488,205 @@ class TestKnowledgeApproveReject:
         result = await db_session.execute(stmt)
         rejected = result.scalar_one_or_none()
         assert rejected.is_active is False
+
+
+class TestTriggerAutoLearning:
+    """自动学习管道测试"""
+
+    async def test_auto_learning_creates_rule(self, db_session):
+        """测试从反馈创建新规则"""
+        # 创建完整的合同 -> 分析 -> 条款链
+        contract = Contract(
+            id="learn_contract",
+            title="自动学习合同",
+            type="租赁合同",
+        )
+        analysis = Analysis(
+            id="learn_analysis",
+            contract_id="learn_contract",
+            model_used="deepseek-chat",
+            overall_score=60,
+            summary="风险较高",
+            recommendation="negotiate_first",
+        )
+        clause = ClauseAnalysis(
+            id="learn_clause",
+            analysis_id="learn_analysis",
+            clause_number="第一条",
+            clause_content="本合同约定甲方应在签订后三日内支付全部租金",
+            risk_level="yellow",
+            risk_type="付款期限过短",
+            risk_summary="付款期限偏短",
+            plain_explanation="付款时间太紧",
+        )
+        db_session.add_all([contract, analysis, clause])
+        await db_session.commit()
+
+        engine = KnowledgeEngine(db_session)
+        result = await engine.trigger_auto_learning(clause)
+
+        # 应成功创建规则
+        assert result is not None
+        assert result["success"] is True
+        assert result["id"] is not None
+
+        # 验证规则内容
+        stmt = select(KnowledgeRule).where(KnowledgeRule.id == result["id"])
+        db_result = await db_session.execute(stmt)
+        rule = db_result.scalar_one_or_none()
+        assert rule is not None
+        assert rule.rule_text == "本合同约定甲方应在签订后三日内支付全部租金"
+        assert rule.source == "auto_learned"
+        assert rule.confidence == 0.6
+        # 类别应通过 Analysis -> Contract 映射为 "租赁"
+        assert rule.category == "租赁"
+
+    async def test_auto_learning_empty_content_skips(self, db_session):
+        """测试空条款内容跳过学习"""
+        clause = ClauseAnalysis(
+            id="empty_clause",
+            analysis_id="empty_analysis",
+            clause_number="第一条",
+            clause_content="",
+            risk_level="green",
+        )
+        db_session.add(clause)
+        await db_session.commit()
+
+        engine = KnowledgeEngine(db_session)
+        result = await engine.trigger_auto_learning(clause)
+        assert result is None
+
+    async def test_auto_learning_whitespace_content_skips(self, db_session):
+        """测试纯空白条款内容跳过学习"""
+        clause = ClauseAnalysis(
+            id="ws_clause",
+            analysis_id="ws_analysis",
+            clause_number="第一条",
+            clause_content="   \n\t  ",
+            risk_level="green",
+        )
+        db_session.add(clause)
+        await db_session.commit()
+
+        engine = KnowledgeEngine(db_session)
+        result = await engine.trigger_auto_learning(clause)
+        assert result is None
+
+    async def test_auto_learning_duplicate_skips(self, db_session):
+        """测试重复规则跳过学习"""
+        # 预先插入相同内容的规则
+        existing_rule = KnowledgeRule(
+            id="existing_rule",
+            category="租赁",
+            rule_text="已有规则内容",
+            is_active=True,
+        )
+        db_session.add(existing_rule)
+        await db_session.commit()
+
+        clause = ClauseAnalysis(
+            id="dup_clause",
+            analysis_id="dup_analysis",
+            clause_number="第一条",
+            clause_content="已有规则内容",
+            risk_level="red",
+            risk_type="违约金过高",
+        )
+        db_session.add(clause)
+        await db_session.commit()
+
+        engine = KnowledgeEngine(db_session)
+        result = await engine.trigger_auto_learning(clause)
+        assert result is None  # 应跳过，因为规则已存在
+
+    async def test_auto_learning_category_from_contract_type(self, db_session):
+        """测试通过 Analysis -> Contract 正确映射规则类别"""
+        # 创建劳动合同的完整链
+        contract = Contract(
+            id="labor_contract",
+            title="劳动合同",
+            type="劳动合同",
+        )
+        analysis = Analysis(
+            id="labor_analysis",
+            contract_id="labor_contract",
+            model_used="deepseek-chat",
+            overall_score=80,
+        )
+        clause = ClauseAnalysis(
+            id="labor_clause",
+            analysis_id="labor_analysis",
+            clause_number="第一条",
+            clause_content="试用期不得超过六个月",
+            risk_level="yellow",
+            risk_type="试用期过长",
+        )
+        db_session.add_all([contract, analysis, clause])
+        await db_session.commit()
+
+        engine = KnowledgeEngine(db_session)
+        result = await engine.trigger_auto_learning(clause)
+
+        assert result is not None
+        stmt = select(KnowledgeRule).where(KnowledgeRule.id == result["id"])
+        db_result = await db_session.execute(stmt)
+        rule = db_result.scalar_one_or_none()
+        # 类别应映射为 "劳动"
+        assert rule.category == "劳动"
+
+    async def test_auto_learning_no_analysis_fallback(self, db_session):
+        """测试无 Analysis 关联时使用通用类别"""
+        clause = ClauseAnalysis(
+            id="orphan_clause",
+            analysis_id="nonexistent_analysis",
+            clause_number="第一条",
+            clause_content="无关联分析的条款内容",
+            risk_level="red",
+        )
+        db_session.add(clause)
+        await db_session.commit()
+
+        engine = KnowledgeEngine(db_session)
+        result = await engine.trigger_auto_learning(clause)
+
+        assert result is not None
+        stmt = select(KnowledgeRule).where(KnowledgeRule.id == result["id"])
+        db_result = await db_session.execute(stmt)
+        rule = db_result.scalar_one_or_none()
+        # 无关联分析时应使用默认 "通用" 类别
+        assert rule.category == "通用"
+
+    async def test_auto_learning_unknown_contract_type(self, db_session):
+        """测试未知合同类型使用通用类别"""
+        contract = Contract(
+            id="unknown_type_contract",
+            title="未知类型合同",
+            type="特许经营合同",  # 不在 TYPE_CATEGORY_MAP 中
+        )
+        analysis = Analysis(
+            id="unknown_analysis",
+            contract_id="unknown_type_contract",
+            model_used="deepseek-chat",
+            overall_score=70,
+        )
+        clause = ClauseAnalysis(
+            id="unknown_clause",
+            analysis_id="unknown_analysis",
+            clause_number="第一条",
+            clause_content="特许经营费为五万元",
+            risk_level="yellow",
+            risk_type="费用过高",
+        )
+        db_session.add_all([contract, analysis, clause])
+        await db_session.commit()
+
+        engine = KnowledgeEngine(db_session)
+        result = await engine.trigger_auto_learning(clause)
+
+        assert result is not None
+        stmt = select(KnowledgeRule).where(KnowledgeRule.id == result["id"])
+        db_result = await db_session.execute(stmt)
+        rule = db_result.scalar_one_or_none()
+        # 未知类型应映射为 "通用"
+        assert rule.category == "通用"

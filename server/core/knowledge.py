@@ -303,8 +303,18 @@ class KnowledgeEngine:
         # 提取关键词（取条款内容的前 20 个字作为触发词）
         keywords = _extract_keywords(clause_content)
 
-        # 映射风险类型到规则类别
-        category = TYPE_CATEGORY_MAP.get(clause.risk_type, "通用") if clause.risk_type else "通用"
+        # 通过 Analysis -> Contract 获取合同类型，映射到规则类别
+        category = "通用"
+        if clause.analysis_id:
+            analysis_stmt = select(Analysis).where(Analysis.id == clause.analysis_id)
+            analysis_result = await self.db.execute(analysis_stmt)
+            analysis = analysis_result.scalar_one_or_none()
+            if analysis and analysis.contract_id:
+                contract_stmt = select(Contract).where(Contract.id == analysis.contract_id)
+                contract_result = await self.db.execute(contract_stmt)
+                contract = contract_result.scalar_one_or_none()
+                if contract and contract.type:
+                    category = TYPE_CATEGORY_MAP.get(contract.type, "通用")
 
         new_rule = {
             "category": category,

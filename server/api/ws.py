@@ -216,6 +216,15 @@ async def websocket_client(websocket: WebSocket):
         logger.info("手机端已断开，当前连接数: %d", len(active_connections))
     except Exception as e:
         logger.error("WebSocket 错误: %s", e)
+        # 尝试通知客户端错误信息，避免客户端无限等待
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "message": f"连接异常: {e}",
+                "code": "CONNECTION_ERROR",
+            })
+        except Exception:
+            pass
         if websocket in active_connections:
             active_connections.remove(websocket)
         connection_info.pop(websocket, None)
