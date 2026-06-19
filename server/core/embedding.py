@@ -30,6 +30,7 @@ def _get_model():
 
     try:
         from sentence_transformers import SentenceTransformer
+        logger.info("正在加载 Embedding 模型: text2vec-base-chinese (首次加载需下载约 400MB)")
         _model = SentenceTransformer("shibing624/text2vec-base-chinese")
         _model_available = True
         logger.info("Embedding 模型加载完成: text2vec-base-chinese")
@@ -42,7 +43,7 @@ def _get_model():
         _model_available = False
         return None
     except Exception as e:
-        logger.warning("Embedding 模型加载失败: %s", e)
+        logger.warning("Embedding 模型加载失败: %s (将降级为纯关键词搜索)", e)
         _model_available = False
         return None
 

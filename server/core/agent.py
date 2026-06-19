@@ -124,16 +124,25 @@ class ContractAgent:
         result.contract_type_en = parse_result.contract_type_en
         result.model_used = parse_result.recommended_model
 
-        # ── 知识库检索 ──
+        # ── 知识库检索（超时降级） ──
         kb_rules: list[str] = []
         kb_laws: list[dict] = []
         try:
             async with async_session_factory() as db:
                 knowledge = KnowledgeEngine(db)
-                kb_rules = await knowledge.search(full_text[:500], parse_result.contract_type)
-                kb_laws = await knowledge.search_laws(full_text[:500], parse_result.contract_type)
+                # 使用 wait_for 设置超时，避免 embedding 模型下载卡住
+                kb_rules = await asyncio.wait_for(
+                    knowledge.search(full_text[:500], parse_result.contract_type),
+                    timeout=30.0,  # 30 秒超时
+                )
+                kb_laws = await asyncio.wait_for(
+                    knowledge.search_laws(full_text[:500], parse_result.contract_type),
+                    timeout=10.0,
+                )
+        except asyncio.TimeoutError:
+            logger.warning("知识库检索超时（30s），跳过知识库增强，继续分析")
         except Exception as e:
-            logger.warning("知识库检索失败: %s", e)
+            logger.warning("知识库检索失败: %s，跳过知识库增强", e)
 
         # ── Stage 2: 并行风险评估（含冲突解决） ──
         total_workers = len(DIMENSIONS)
