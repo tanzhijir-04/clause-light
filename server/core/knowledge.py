@@ -83,9 +83,9 @@ class KnowledgeEngine:
 
         # ── 语义向量评分（如果可用） ──
         vector_scores: dict[str, float] = {}
-        if embedding.is_available():
+        if await embedding.is_available_async():
             try:
-                # 编码查询文本
+                # 编码查询文本（使用同步版本，因为模型已加载）
                 query_vec = embedding.encode_single(query)
                 if query_vec is not None:
                     import numpy as np
