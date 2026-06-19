@@ -173,6 +173,203 @@ A: 租赁、劳动、装修、外包、借款、服务等常见合同类型。
 
 ---
 
+## 技术细节
+
+> 以下内容面向开发者，普通用户可跳过。
+
+### 系统架构
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        手机端 PWA                                │
+│  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────┐ │
+│  │ 拍照 / 上传  │  │ WebSocket    │  │ AsyncStorage 本地缓存  │ │
+│  │ HTML5 Camera │  │              │  │ 离线可用               │ │
+│  └──────┬───────┘  └──────┬───────┘  └────────────────────────┘ │
+└─────────┼─────────────────┼────────────────────────────────────┘
+          │                 │
+          ▼                 ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     电脑端 FastAPI 服务                           │
+│                                                                 │
+│  ┌─────────────┐    ┌─────────────┐    ┌──────────────────────┐ │
+│  │  OCR 引擎   │    │ Agent 编排  │    │    LLM 网关          │ │
+│  │ PaddleOCR   │───▶│ 三段式流水线│───▶│ DeepSeek / OpenAI    │ │
+│  │ 文字识别    │    │ 风险分析    │    │ Ollama / 通义千问    │ │
+│  └─────────────┘    └──────┬──────┘    └──────────────────────┘ │
+│                            │                                    │
+│  ┌─────────────┐    ┌──────▼──────┐    ┌──────────────────────┐ │
+│  │  知识库     │    │  SQLite     │    │    同步引擎          │ │
+│  │ 规则 + 法规 │◀──▶│  数据库     │    │ WebDAV / S3          │ │
+│  └─────────────┘    └─────────────┘    └──────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 技术栈详解
+
+| 层级 | 技术 | 用途 |
+|------|------|------|
+| 后端框架 | Python 3.10+ / FastAPI | 高性能异步 Web 框架 |
+| 数据库 | SQLite + SQLAlchemy ORM | 零配置，数据本地存储 |
+| OCR | PaddleOCR-VL | 中文合同文字识别 |
+| LLM 调用 | OpenAI SDK（兼容格式） | 统一网关，支持多家大模型 |
+| 本地 LLM | Ollama | 可选，完全离线运行 |
+| Embedding | sentence-transformers | 本地向量化，知识库语义检索 |
+| 前端 | 纯 HTML / CSS / JavaScript | 无框架依赖，PWA 离线可用 |
+| 同步 | WebDAV / S3 | 多设备数据同步 |
+
+### 目录结构
+
+```
+clause-light/
+├── server/                    # 电脑端后端
+│   ├── main.py                # FastAPI 入口
+│   ├── config.py              # 配置管理
+│   ├── api/                   # API 路由层
+│   │   ├── contracts.py       #   合同分析接口
+│   │   ├── knowledge.py       #   知识库接口
+│   │   └── sync.py            #   同步接口
+│   ├── core/                  # 核心业务逻辑
+│   │   ├── agent.py           #   Agent 流程编排
+│   │   ├── ocr.py             #   OCR 封装
+│   │   ├── llm.py             #   LLM 网关
+│   │   ├── embedding.py       #   Embedding 服务
+│   │   ├── knowledge.py       #   知识库引擎
+│   │   └── workers/           #   三段式分析流水线
+│   │       ├── parser.py      #     结构解析
+│   │       ├── workers.py     #     并行风险评估
+│   │       └── evaluator.py   #     聚合评分
+│   ├── models/                # 数据模型
+│   │   └── database.py        #   SQLAlchemy 模型
+│   └── static/                # Web 管理面板前端
+│       ├── index.html         #   主入口
+│       ├── css/               #   样式
+│       └── js/                #   JavaScript
+│
+├── mobile/                    # 手机端 React Native
+│   ├── App.tsx                # 根组件
+│   └── src/                   # 源码
+│
+├── shared/                    # 共享数据
+│   ├── rules/                 #   知识库规则（JSON）
+│   └── laws/                  #   法规条文（JSON）
+│
+├── asset/                     # Logo、图标等资源
+├── data/                      # 运行时数据（gitignored）
+├── scripts/                   # 工具脚本
+├── docker/                    # Docker 配置
+├── tests/                     # 测试
+└── docs/                      # 文档
+```
+
+### 三段式 Agent 分析流水线
+
+```
+OCR 识别全文
+      │
+      ▼
+Stage 1: 结构解析（LLM）
+  全文 → 拆分为条款 → 识别合同类型
+  输出: ClauseItem[]
+      │
+      ├──▶ 知识库检索（关键词 + 向量）
+      │
+      ▼
+Stage 2: 并行风险评估（5 个 Worker）
+  ┌──────────┐ ┌──────────┐ ┌──────────┐
+  │ 权责对等 │ │ 财务风险 │ │ 知识产权 │
+  └──────────┘ └──────────┘ └──────────┘
+  ┌──────────┐ ┌──────────┐
+  │ 争议解决 │ │ 通用风险 │
+  └──────────┘ └──────────┘
+      │
+      ▼
+Stage 3: 聚合评分（LLM）
+  合并所有维度 → 综合评分 → 生成建议
+  输出: 0-100 分 + 签署建议
+```
+
+### 5 个分析维度
+
+| 维度 | 名称 | 关注点 |
+|------|------|--------|
+| equity | 权责对等 | 双方义务是否对等，单方面条款 |
+| financial | 财务风险 | 付款周期、违约金、赔偿上限 |
+| ip | 知识产权 | IP 归属、保密义务、竞业限制 |
+| dispute | 争议解决 | 管辖地、仲裁条款、举证责任 |
+| general | 通用风险 | 不可抗力、合同变更、其他条款 |
+
+### API 接口
+
+所有 API 返回 JSON 格式。Swagger 文档：http://localhost:8080/docs
+
+#### 合同接口
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/api/contracts/` | 获取合同列表 |
+| `GET` | `/api/contracts/{id}` | 获取合同详情 |
+| `POST` | `/api/contracts/analyze` | 上传并分析合同（SSE 流式返回） |
+| `PUT` | `/api/contracts/{id}` | 更新合同信息 |
+| `DELETE` | `/api/contracts/{id}` | 删除合同 |
+| `POST` | `/api/contracts/{id}/feedback` | 提交条款反馈 |
+
+#### 知识库接口
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/api/knowledge/rules` | 获取规则列表 |
+| `POST` | `/api/knowledge/rules` | 创建新规则 |
+| `PUT` | `/api/knowledge/rules/{id}` | 更新规则 |
+| `DELETE` | `/api/knowledge/rules/{id}` | 删除规则 |
+| `GET` | `/api/knowledge/stats` | 知识库统计 |
+| `GET` | `/api/knowledge/laws` | 法规条文列表 |
+
+#### 其他接口
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/api/settings/llm` | 获取 LLM 配置 |
+| `PUT` | `/api/settings/llm` | 更新 LLM 配置 |
+| `POST` | `/api/settings/llm/test` | 测试 LLM 连接 |
+| `GET` | `/api/sync/config` | 获取同步配置 |
+| `POST` | `/api/sync/push` | 推送到云端 |
+| `POST` | `/api/sync/pull` | 从云端拉取 |
+
+### 环境变量
+
+```bash
+# LLM 配置（至少配一个）
+LLM_DEEPSEEK_API_KEY=sk-xxx
+LLM_OPENAI_API_KEY=sk-xxx
+
+# 本地 LLM（可选）
+OLLAMA_ENDPOINT=http://localhost:11434
+
+# 服务配置
+HOST=0.0.0.0
+PORT=8080
+DEBUG=false
+
+# OCR 配置
+OCR_USE_GPU=false
+
+# 同步配置（可选）
+SYNC_ENABLED=false
+WEBDAV_URL=
+WEBDAV_USERNAME=
+WEBDAV_PASSWORD=
+```
+
+### Docker 部署
+
+```bash
+cd docker
+docker-compose up -d --build
+```
+
+---
+
 ## 许可证
 
 [MIT License](LICENSE) — 自由使用、修改、分发。
