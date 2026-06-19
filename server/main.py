@@ -67,6 +67,8 @@ async def lifespan(app: FastAPI):
 
 async def _init_default_rules():
     """如果知识库为空，导入默认规则"""
+    import json
+
     from sqlalchemy import func, select
 
     from server.models.database import KnowledgeRule, async_session_factory
@@ -81,8 +83,6 @@ async def _init_default_rules():
             # 尝试从 shared/rules/ 导入
             rules_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "shared", "rules")
             if os.path.isdir(rules_dir):
-                import json
-
                 for filename in os.listdir(rules_dir):
                     if filename.endswith(".json"):
                         filepath = os.path.join(rules_dir, filename)
@@ -124,11 +124,20 @@ async def _init_default_rules():
                         with open(filepath, "r", encoding="utf-8") as f:
                             laws_data = json.load(f)
                         for law in laws_data:
+                            # 解析日期字符串为 date 对象
+                            eff_date = None
+                            if law.get("effective_date"):
+                                try:
+                                    from datetime import date as _date
+                                    eff_date = _date.fromisoformat(law["effective_date"])
+                                except (ValueError, TypeError):
+                                    pass
+
                             ref = LegalReference(
                                 law_name=law["law_name"],
                                 article_number=law.get("article_number", ""),
                                 content=law.get("content", ""),
-                                effective_date=law.get("effective_date"),
+                                effective_date=eff_date,
                                 tags=json.dumps(law.get("tags", []), ensure_ascii=False),
                             )
                             db.add(ref)
