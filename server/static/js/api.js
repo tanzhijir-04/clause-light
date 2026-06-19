@@ -54,7 +54,7 @@ const API = (() => {
     /**
      * 流式分析合同（SSE），返回 { onProgress, onResult, onError, done }
      * @param {File} file - 要上传的文件
-     * @param {object} callbacks - { onProgress(step, total, message), onResult(data), onError(message) }
+     * @param {object} callbacks - { onProgress(step, total, message, substep), onResult(data), onError(message) }
      */
     analyzeStream(file, callbacks = {}) {
       const form = new FormData();
@@ -87,7 +87,7 @@ const API = (() => {
               try {
                 const data = JSON.parse(line.slice(6));
                 if (data.type === 'progress' && callbacks.onProgress) {
-                  callbacks.onProgress(data.step, data.total, data.message);
+                  callbacks.onProgress(data.step, data.total, data.message, data.substep);
                 } else if (data.type === 'result' && callbacks.onResult) {
                   callbacks.onResult(data);
                 } else if (data.type === 'error' && callbacks.onError) {

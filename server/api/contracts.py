@@ -231,6 +231,39 @@ async def analyze_contract(
             """Agent 回调：将进度事件放入队列"""
             await progress_queue.put({"type": "progress", "step": step, "total": total, "message": message})
 
+        def on_embedding_progress(current: int, total: int, desc: str) -> None:
+            """Embedding 模型下载进度回调（同步，在线程池中调用）"""
+            # 构建进度消息
+            if total > 0:
+                # 格式化下载进度
+                if current >= 1024 * 1024:
+                    # 已下载超过 1MB，显示 MB 单位
+                    mb_current = current / 1024 / 1024
+                    mb_total = total / 1024 / 1024
+                    msg = f"下载知识库模型: {mb_current:.1f}/{mb_total:.1f}MB"
+                else:
+                    msg = f"下载知识库模型: {current}/{total}"
+            else:
+                msg = f"下载知识库模型: {desc or '准备中...'}"
+
+            # 放入队列（线程安全）
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.ensure_future(progress_queue.put({
+                        "type": "progress",
+                        "step": 2,
+                        "total": 5,
+                        "message": msg,
+                        "substep": desc,
+                    }))
+            except Exception:
+                pass
+
+        # 设置 embedding 下载进度回调
+        from server.core import embedding
+        embedding.set_progress_callback(on_embedding_progress)
+
         async def run_agent():
             """在后台运行 Agent，完成后放入结束标记"""
             try:
@@ -243,6 +276,8 @@ async def analyze_contract(
                 logger.error("Agent 分析异常: %s", e)
                 return type('obj', (object,), {'error': f'合同分析异常: {e}', 'ocr_text': '', 'contract_id': ''})()
             finally:
+                # 清除 embedding 进度回调
+                embedding._clear_progress_callback()
                 await progress_queue.put(None)  # 结束标记
 
         # 启动 Agent 任务

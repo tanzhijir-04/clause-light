@@ -127,22 +127,49 @@ class ContractAgent:
         # ── 知识库检索（超时降级） ──
         kb_rules: list[str] = []
         kb_laws: list[dict] = []
+
+        # 设置 embedding 下载进度回调（首次下载时显示进度）
+        from server.core import embedding
+
+        def _embedding_progress(current: int, total: int, desc: str):
+            """embedding 模型下载进度回调（在线程池中调用）"""
+            if total > 0:
+                # 计算下载大小（模型约 400MB）
+                mb_current = current / 1024 / 1024 if current > 10000 else current
+                mb_total = total / 1024 / 1024 if total > 10000 else total
+                msg = f"下载知识库模型: {mb_current:.1f}/{mb_total:.1f}MB"
+            else:
+                msg = f"下载知识库模型: {desc or '准备中...'}"
+
+            # 通过 asyncio 打包同步回调为异步任务
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.ensure_future(_notify(2, 5, msg))
+            except Exception:
+                pass
+
+        embedding.set_progress_callback(_embedding_progress)
+
         try:
             async with async_session_factory() as db:
                 knowledge = KnowledgeEngine(db)
                 # 使用 wait_for 设置超时，避免 embedding 模型下载卡住
                 kb_rules = await asyncio.wait_for(
                     knowledge.search(full_text[:500], parse_result.contract_type),
-                    timeout=30.0,  # 30 秒超时
+                    timeout=60.0,  # 60 秒超时（给模型下载更多时间）
                 )
                 kb_laws = await asyncio.wait_for(
                     knowledge.search_laws(full_text[:500], parse_result.contract_type),
                     timeout=10.0,
                 )
         except asyncio.TimeoutError:
-            logger.warning("知识库检索超时（30s），跳过知识库增强，继续分析")
+            logger.warning("知识库检索超时（60s），跳过知识库增强，继续分析")
         except Exception as e:
             logger.warning("知识库检索失败: %s，跳过知识库增强", e)
+        finally:
+            # 确保回调被清除
+            embedding._clear_progress_callback()
 
         # ── Stage 2: 并行风险评估（含冲突解决） ──
         total_workers = len(DIMENSIONS)

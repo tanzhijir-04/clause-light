@@ -134,13 +134,14 @@ const Components = (() => {
     };
 
     API.contracts.analyzeStream(file, {
-      onProgress(step, total, message) {
+      onProgress(step, total, message, substep) {
         const pct = Math.round((step / total) * 100);
         const titleEl = document.getElementById('upload-progress-title');
         const hintEl = document.getElementById('upload-progress-hint');
         const barEl = document.getElementById('upload-progress-bar');
-        if (titleEl) titleEl.textContent = message || (progressSteps[`step`] || '分析中...');
-        if (hintEl) hintEl.textContent = `步骤 ${step}/${total}`;
+        if (titleEl) titleEl.textContent = message || (progressSteps[step] || '分析中...');
+        // 如果有 substep（如下载进度），显示更详细的信息
+        if (hintEl) hintEl.textContent = substep || `步骤 ${step}/${total}`;
         if (barEl) barEl.style.width = pct + '%';
       },
       onResult(data) {

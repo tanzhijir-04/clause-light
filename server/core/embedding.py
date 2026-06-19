@@ -4,13 +4,14 @@
 未安装则自动降级为纯关键词搜索（不报错）。
 
 重要：所有模型加载操作都使用线程池执行，避免阻塞 asyncio 事件循环。
+支持进度回调，可在网页端显示模型下载进度。
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+from typing import Callable, Optional
 
 import numpy as np
 
@@ -21,12 +22,91 @@ _model = None
 _model_available: bool | None = None  # None = 未检测, True/False = 已检测
 _loading_lock = asyncio.Lock() if hasattr(asyncio, 'Lock') else None
 
+# 进度回调函数：callback(current, total, desc)
+_progress_callback: Optional[Callable[[int, int, str], None]] = None
+
+
+def set_progress_callback(callback: Optional[Callable[[int, int, str], None]]) -> None:
+    """设置模型下载进度回调函数
+
+    Args:
+        callback: 回调函数，参数为 (current, total, description)
+                  当下载完成时会调用 callback(total, total, "完成")
+    """
+    global _progress_callback
+    _progress_callback = callback
+
+
+def _clear_progress_callback():
+    """清除进度回调"""
+    global _progress_callback
+    _progress_callback = None
+
+
+class _ProgressTqdm:
+    """自定义 tqdm 类，将下载进度通过回调函数发送
+
+    sentence-transformers 的 SentenceTransformer 构造函数支持 tqdm_class 参数，
+    我们用这个类替换默认的 tqdm，将进度信息转发到回调函数。
+    """
+
+    def __init__(self, total=None, desc='', unit='B', unit_scale=True, **kwargs):
+        self.total = total
+        self.desc = desc
+        self.n = 0
+        self.unit = unit
+        self.unit_scale = unit_scale
+
+    def update(self, n=1):
+        self.n += n
+        if _progress_callback:
+            try:
+                _progress_callback(self.n, self.total or 0, self.desc)
+            except Exception:
+                pass  # 回调异常不应影响下载
+
+    def close(self):
+        if _progress_callback:
+            try:
+                _progress_callback(self.total or self.n, self.total or self.n, "完成")
+            except Exception:
+                pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+    # 兼容 tqdm 的其他方法
+    def set_description(self, desc, refresh=True):
+        self.desc = desc
+
+    def set_postfix(self, *args, **kwargs):
+        pass
+
+    def refresh(self):
+        pass
+
 
 def _load_model_sync():
     """同步加载 SentenceTransformer 模型（在线程池中执行）"""
     from sentence_transformers import SentenceTransformer
-    logger.info("正在下载 Embedding 模型: text2vec-base-chinese (首次需下载约 400MB，请耐心等待)")
-    model = SentenceTransformer("shibing624/text2vec-base-chinese")
+
+    logger.info("正在下载 Embedding 模型: text2vec-base-chinese (首次需下载约 400MB)")
+
+    if _progress_callback:
+        try:
+            _progress_callback(0, 0, "正在连接下载服务器...")
+        except Exception:
+            pass
+
+    # 使用自定义 tqdm 类来捕获下载进度
+    model = SentenceTransformer(
+        "shibing624/text2vec-base-chinese",
+        tqdm_class=_ProgressTqdm,
+    )
+
     logger.info("Embedding 模型加载完成: text2vec-base-chinese")
     return model
 
@@ -85,6 +165,9 @@ async def _get_model_async():
         logger.warning("Embedding 模型加载失败: %s (将降级为纯关键词搜索)", e)
         _model_available = False
         return None
+    finally:
+        # 下载完成后清除回调
+        _clear_progress_callback()
 
 
 def is_available() -> bool:
