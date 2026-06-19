@@ -116,8 +116,10 @@ const API = (() => {
       });
     },
     async delete(id) {
-      if (USE_MOCK) return { success: true };
       return _fetch(`/api/contracts/${id}`, { method: 'DELETE' });
+    },
+    async update(id, data) {
+      return _fetch(`/api/contracts/${id}`, { method: 'PUT', body: JSON.stringify(data) });
     },
   };
 

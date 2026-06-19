@@ -58,7 +58,12 @@ const ContractDetailPage = {
             <div style="display:flex;align-items:center;gap:var(--sp-2);margin-bottom:var(--sp-1)">
               <button class="btn btn-ghost btn-sm" onclick="Router.navigate('contracts')" style="margin-left:-8px">${Icons.chevronRight(16)} 返回</button>
             </div>
-            <div class="content-title">${Components.escapeHtml(contract.title)}</div>
+            <div style="display:flex;align-items:center;gap:var(--sp-2)">
+              <div class="content-title">${Components.escapeHtml(contract.title)}</div>
+              <button class="btn btn-ghost btn-sm" onclick="ContractDetailPage._editTitle()" title="编辑名称" style="padding:4px 8px">
+                ${Icons.edit(14)}
+              </button>
+            </div>
             <div class="content-subtitle">${Components.escapeHtml(contract.type)} · ${Components.escapeHtml(contract.createdAt)}</div>
           </div>
           <div style="display:flex;align-items:center;gap:var(--sp-4)">
@@ -545,6 +550,35 @@ const ContractDetailPage = {
       Components.toast(feedback === 'correct' ? '已标注为准确' : '已标注为不准确', 'success');
     } catch (e) {
       Components.toast('提交失败：' + e.message, 'error');
+    }
+  },
+
+  /** 编辑合同名称 */
+  async _editTitle() {
+    const contract = this._contract;
+    if (!contract) return;
+
+    const newTitle = prompt('请输入新的合同名称：', contract.title);
+    if (newTitle === null || newTitle.trim() === '' || newTitle === contract.title) {
+      return;
+    }
+
+    try {
+      const res = await API.contracts.update(contract.id, { title: newTitle.trim() });
+      if (res && res.success) {
+        // 更新本地数据
+        contract.title = newTitle.trim();
+        // 更新页面显示
+        const titleEl = document.querySelector('.content-title');
+        if (titleEl) titleEl.textContent = newTitle.trim();
+        // 更新浏览器标题
+        document.title = `${newTitle.trim()} - 合同红绿灯`;
+        Components.toast('合同名称已更新', 'success');
+      } else {
+        Components.toast('更新失败：' + (res?.detail || '未知错误'), 'error');
+      }
+    } catch (e) {
+      Components.toast('更新失败：' + e.message, 'error');
     }
   },
 

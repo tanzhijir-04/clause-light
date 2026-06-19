@@ -403,6 +403,30 @@ async def submit_feedback(
     }
 
 
+@router.put("/{contract_id}")
+async def update_contract(
+    contract_id: str,
+    data: dict = {},
+    db: AsyncSession = Depends(get_db),
+):
+    """更新合同信息（如合同名称、类型等）"""
+    stmt = select(Contract).where(Contract.id == contract_id)
+    result = await db.execute(stmt)
+    contract = result.scalar_one_or_none()
+    if not contract:
+        raise HTTPException(status_code=404, detail="合同不存在")
+
+    # 更新允许的字段
+    if "title" in data:
+        contract.title = data["title"]
+    if "type" in data:
+        contract.type = data["type"]
+
+    await db.commit()
+
+    return {"success": True, "message": "合同已更新"}
+
+
 @router.delete("/{contract_id}")
 async def delete_contract(
     contract_id: str,

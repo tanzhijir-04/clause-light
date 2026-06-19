@@ -24,7 +24,12 @@ const ContractsPage = {
     contracts.forEach(c => {
       const scoreClass = c.score >= 70 ? 'score-green' : c.score >= 50 ? 'score-yellow' : 'score-red';
       tableRows += `<tr class="table-row-clickable" onclick="Router.navigate('contracts/${c.id}')">
-        <td style="font-weight:500">${Components.escapeHtml(c.title)}</td>
+        <td style="font-weight:500;display:flex;align-items:center;gap:var(--sp-2)">
+          <span class="contract-title" id="title-${c.id}">${Components.escapeHtml(c.title)}</span>
+          <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();ContractsPage.editTitle('${c.id}','${Components.escapeHtml(c.title)}')" title="编辑名称" style="opacity:0.5;padding:2px 4px">
+            ${Icons.edit(12)}
+          </button>
+        </td>
         <td class="table-cell-secondary">${Components.escapeHtml(c.type)}</td>
         <td>${Components.RiskBadge(c.riskLevel)}</td>
         <td><span class="${scoreClass}" style="font-weight:600;font-size:var(--text-md)">${c.score}</span></td>
@@ -114,6 +119,25 @@ const ContractsPage = {
 
   handleUpload(input) {
     Components.handleFileUpload(input);
+  },
+
+  /** 编辑合同名称 */
+  editTitle(contractId, currentTitle) {
+    const newTitle = prompt('请输入新的合同名称：', currentTitle);
+    if (newTitle === null || newTitle.trim() === '' || newTitle === currentTitle) {
+      return;
+    }
+
+    API.contracts.update(contractId, { title: newTitle.trim() }).then(res => {
+      if (res && res.success) {
+        Components.toast('合同名称已更新', 'success');
+        App.renderCurrentPage();
+      } else {
+        Components.toast('更新失败：' + (res?.detail || '未知错误'), 'error');
+      }
+    }).catch(e => {
+      Components.toast('更新失败：' + e.message, 'error');
+    });
   },
 
   /** 删除合同 */
