@@ -14,6 +14,20 @@
   <img src="https://img.shields.io/badge/LLM-OpenAI%20Compatible-brightgreen" alt="LLM" />
 </p>
 
+<p align="center">
+  🌐 <strong>官网</strong>：<a href="https://clause-light.pages.dev/">https://clause-light.pages.dev/</a>
+</p>
+
+---
+
+> ⚠️ **项目状态**
+>
+> 本项目仍在**积极开发中**，部分功能尚未完善：
+> - 📱 手机端 PWA 正在开发中，暂不可用
+> - 🐛 其他功能可能存在 Bug
+>
+> 如果你遇到问题或有建议，欢迎提交 [Issue](https://github.com/tanzhijir-04/clause-light/issues)！
+
 ---
 
 ## 这是什么？
