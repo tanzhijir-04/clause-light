@@ -188,6 +188,7 @@ async def log_requests(request: Request, call_next):
 
 # ── 注册路由 ──
 
+from server.api.chat import router as chat_router
 from server.api.contracts import router as contracts_router
 from server.api.knowledge import router as knowledge_router
 from server.api.memory import router as memory_router
@@ -199,6 +200,7 @@ from server.api.ws import router as ws_router
 from server.api.connection import router as connection_router
 
 app.include_router(contracts_router)
+app.include_router(chat_router)
 app.include_router(knowledge_router)
 app.include_router(memory_router)
 app.include_router(skills_router)
