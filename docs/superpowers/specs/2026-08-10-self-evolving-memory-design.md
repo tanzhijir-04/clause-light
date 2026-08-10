@@ -37,6 +37,7 @@
 | 结构化输出 | **Outlines（.txt）** 经 `LLMGateway.chat_structured` 约束 Stage1–3 / Distill |
 | 多用户 / ACL | 表结构一期预留 `owner_user_id` + `visibility` + ACL；UI/登录后置 |
 | 追问对话 | Phase D：合同多轮问答，复用 L0 历史 + LightRAG/Wiki 检索 |
+| 文档入口 | **AnyDoc（已确认）**：办公文档/文字 PDF → Markdown；图片与扫描件自动 PaddleOCR |
 
 ## 3. 架构总览
 
@@ -75,11 +76,32 @@
 | `server/core/llm.py` | 含 Outlines 结构化输出 | 业务编排 |
 | `server/core/memory/adapters/` | TencentDB 同步 | 本地权威存储 |
 | `ContractAgent` | 编排 + 工具 | 持久化细节 |
+| `server/core/document_ingress.py` | 统一文档入口：路由 AnyDoc / Paddle；输出 `full_text`/`markdown` | 风险评级、记忆持久化 |
 
 **A–C 不做**：CodeGraph、完整 Team Hub UI、强制上云、强制 LightRAG。  
-**后置**：D 追问对话；E LightRAG 可选开启；多用户登录 UI。
+**后置**：D 追问对话；E LightRAG 可选开启；多用户登录 UI。  
+**已确认可引入依赖**：`firecrawl-anydoc`（本地解析，不用 Firecrawl 托管 Parse API）。
 
-### 3.1 LightRAG（HKUDS）集成原则
+### 3.0 Document Ingress（文档 + 图片）
+
+上传从「仅 PDF/图片」拓展为 **办公文档 + 图片**。
+
+```text
+上传文件（按内容魔数检测格式，不盲信扩展名）
+  ├─ 图片（png/jpg/jpeg/bmp/tiff/webp）     → PaddleOCR
+  ├─ 扫描型 PDF（文字层不足）              → 转图 → PaddleOCR
+  └─ 文字 PDF / doc(x) / ppt(x) / xls(x) /
+     odt/ods/odp / rtf / epub / csv …     → AnyDoc → Markdown
+                                              └─ 作为 full_text 进入 Stage1
+```
+
+- 对外统一 `DocumentResult(full_text, markdown, source: anydoc|paddle|hybrid, confidence_avg, pages?)`。
+- `OCREngine.recognize` 演进为调用 Ingress，或 Agent 改为调 Ingress（保持 `AnalysisResult.ocr_text` 字段名兼容，内容可为 Markdown）。
+- API `accept` 与校验白名单同步扩展；超大文件仍受 `MAX_UPLOAD_SIZE` 限制。
+- **禁止**默认走 Firecrawl 云端 Parse；仅本地 `firecrawl-anydoc`。
+- AnyDoc 失败且文件为 PDF 时：降级现有 PyMuPDF → Paddle 路径。
+
+## 3.1 LightRAG（HKUDS）集成原则
 
 - **定位**：Wiki/法规/长文档的 low-level + high-level 图检索；服务追问与法规关联。
 - **不定位**：不存 L0；不做偏好权威源（仍归 L1/L3）。
@@ -272,6 +294,7 @@ class TeamMemoryAdapter(Protocol):
 
 | Phase | 计划文件 | 可独立验收 |
 |-------|----------|------------|
+| **0 文档入口** | `docs/superpowers/plans/2026-08-10-document-ingress-anydoc.md` | 办公文档上传；文字档 AnyDoc；图片/扫描自动 Paddle |
 | A 分层记忆 Kernel | `docs/superpowers/plans/2026-08-10-layered-memory-kernel.md` | L0–L3、预算召回、ACL 字段、API+测试 |
 | A′ Outlines | （并入 C 前小任务或独立短计划） | `chat_structured` 覆盖 parser/workers |
 | B 自进化资产 | `docs/superpowers/plans/2026-08-10-self-evolving-assets.md` | Distill、分级生效、Skill/Wiki、待审 |
@@ -281,12 +304,12 @@ class TeamMemoryAdapter(Protocol):
 
 ## 13. 风险与约束
 
-- 遵守现有栈：Python≥3.10、FastAPI、SQLAlchemy、SQLite、sentence-transformers；**Outlines / LightRAG 为新增依赖，引入前须确认**。
+- 遵守现有栈：Python≥3.10、FastAPI、SQLAlchemy、SQLite、sentence-transformers；**已确认可加 `firecrawl-anydoc`**；Outlines / LightRAG 引入前仍须确认。
 - LLM 必须经 `LLMGateway`；Prompt 在 `server/core/prompts/`。
 - 日志不打印完整合同正文或 API Key。
 - 法律内容自动上线有误判风险 → 分级生效 + 可回滚 + 待审。
 - LightRAG 索引与抽实体成本高 → 默认关闭，仅 Wiki ingest / 追问路径按需启用。
-- embedding / LightRAG 超时必须降级，不阻断主分析。
+- embedding / LightRAG / AnyDoc 失败必须降级，不阻断主分析（PDF 可回退 PyMuPDF+Paddle）。
 - Agent 工作流与编码准则见根目录 `AGENTS.md`。
 
 ## 14. 测试策略
