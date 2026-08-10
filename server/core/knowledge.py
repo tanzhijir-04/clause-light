@@ -294,11 +294,10 @@ class KnowledgeEngine:
         }
 
     async def get_pending(self) -> list[dict]:
-        """获取待审核规则"""
+        """获取待审核规则（status=pending）"""
         stmt = (
             select(KnowledgeRule)
-            .where(KnowledgeRule.source == "auto_learned")
-            .where(KnowledgeRule.confidence < 0.7)
+            .where(KnowledgeRule.status == "pending")
             .order_by(KnowledgeRule.confidence.desc())
         )
         result = await self.db.execute(stmt)
@@ -310,6 +309,7 @@ class KnowledgeEngine:
                 "text": rule.rule_text,
                 "source": rule.source,
                 "confidence": rule.confidence,
+                "status": rule.status or "pending",
             }
             for rule in rules
         ]
@@ -340,13 +340,15 @@ class KnowledgeEngine:
         ]
 
     async def approve_rule(self, rule_id: str) -> None:
-        """通过待审核规则"""
+        """通过待审核规则 → status=active 并同步 is_active"""
         stmt = select(KnowledgeRule).where(KnowledgeRule.id == rule_id)
         result = await self.db.execute(stmt)
         rule = result.scalar_one_or_none()
         if rule:
             rule.confidence = min(rule.confidence + 0.2, 1.0)
             rule.source = "manual"
+            rule.status = "active"
+            sync_rule_is_active(rule)
             rule.updated_at = datetime.now(timezone.utc)
             logger.info("审核通过规则: id=%s", rule_id)
 
