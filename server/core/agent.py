@@ -259,6 +259,8 @@ class ContractAgent:
 
             # 构建条款 id → ClauseItem 的映射
             clause_map = {c.id: c for c in parse_result.clauses}
+            # 冲突工具预算：每个分析请求最多额外增强 2 个冲突条款簇
+            conflict_tool_budget = 2
 
             for clause_id, conflict_risks in conflicts.items():
                 clause = clause_map.get(clause_id)
@@ -277,9 +279,64 @@ class ContractAgent:
                 # 从 best_risk 的 risk_type 推断维度
                 resolve_dim = "equity"  # 默认用权责对等维度做最终裁决
 
+                # 按需调用 memory/wiki/skill 工具（预算内）
+                conflict_memory = memory_context
+                if conflict_tool_budget > 0:
+                    try:
+                        from server.core.agent_tools import run_conflict_tools
+
+                        async with async_session_factory() as db:
+                            bundle = await run_conflict_tools(
+                                db,
+                                query=clause.text or clause.title,
+                                contract_type=parse_result.contract_type,
+                            )
+                            extra = "\n".join(
+                                x
+                                for x in (
+                                    bundle.memory_text,
+                                    bundle.wiki_text,
+                                    bundle.skill_text,
+                                )
+                                if x and x.strip()
+                            )
+                            if extra:
+                                conflict_memory = (
+                                    f"{memory_context}\n{extra}".strip()
+                                    if memory_context
+                                    else extra
+                                )
+                            conflict_tool_budget -= 1
+                            if result.session_id:
+                                try:
+                                    from server.core.memory.kernel import MemoryKernel
+
+                                    kernel = MemoryKernel(db)
+                                    await kernel.append_event(
+                                        result.session_id,
+                                        "tool",
+                                        {
+                                            "name": "conflict_tools",
+                                            "clause_id": clause_id,
+                                            "chars": len(extra),
+                                        },
+                                    )
+                                    await db.commit()
+                                except Exception:
+                                    pass
+                    except Exception as e:
+                        logger.warning("冲突工具调用失败，仅用原上下文: %s", e)
+                        conflict_tool_budget -= 1
+
                 new_risk = await analyze_dimension_with_context(
-                    resolve_dim, clause, self.llm, parse_result.contract_type,
-                    cross_context, kb_rules, kb_laws,
+                    resolve_dim,
+                    clause,
+                    self.llm,
+                    parse_result.contract_type,
+                    cross_context,
+                    kb_rules,
+                    kb_laws,
+                    memory_context=conflict_memory,
                 )
 
                 if new_risk:
