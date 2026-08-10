@@ -37,11 +37,11 @@ def effective_rule_status(rule: KnowledgeRule) -> str:
 
 
 def sync_rule_is_active(rule: KnowledgeRule) -> None:
-    """根据 status 同步兼容字段 is_active"""
-    status = effective_rule_status(rule)
-    rule.is_active = status == "active"
+    """根据 status 同步兼容字段 is_active（以 status 字段为准）"""
+    status = rule.status or ("active" if rule.is_active else "disabled")
     if not rule.status:
         rule.status = status
+    rule.is_active = status == "active"
 
 
 class KnowledgeEngine:
