@@ -123,7 +123,9 @@ class TestContractAgent:
         mock_parse.return_value = _mock_parse_result()
 
         # Stage 2: analyze_dimension (5 个维度并行)
-        async def _fake_dimension(dim, clauses, llm, contract_type, kb_rules=None, kb_laws=None):
+        async def _fake_dimension(
+            dim, clauses, llm, contract_type, kb_rules=None, kb_laws=None, memory_context=""
+        ):
             if dim == "equity":
                 return [ClauseRisk(clause_id="1", risk_level="green", issue="正常条款", severity=1)]
             elif dim == "dispute":
@@ -135,7 +137,7 @@ class TestContractAgent:
         # Stage 3: evaluate
         mock_evaluate.return_value = _mock_eval_result()
 
-        # 知识库 mock
+        # 知识库 / 记忆 mock（装配失败应降级，不阻断主流程）
         mock_session = AsyncMock()
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
@@ -163,7 +165,9 @@ class TestContractAgent:
         clauses = [ClauseItem(id="1", type="other", title="试用期", text="试用期三个月", relevance=["general"])]
         mock_parse.return_value = _mock_parse_result(contract_type="劳动合同", clauses=clauses)
 
-        async def _fake_dimension(dim, clauses, llm, contract_type, kb_rules=None, kb_laws=None):
+        async def _fake_dimension(
+            dim, clauses, llm, contract_type, kb_rules=None, kb_laws=None, memory_context=""
+        ):
             if dim == "general":
                 return [ClauseRisk(clause_id="1", risk_level="yellow", risk_type="试用期过长", issue="试用期超过法定上限", severity=6, suggestion="缩短试用期", legal_basis="《劳动合同法》")]
             return []
@@ -243,7 +247,9 @@ class TestContractAgent:
         ]
         mock_parse.return_value = _mock_parse_result(clauses=clauses)
 
-        async def _fake_dimension(dim, clauses, llm, contract_type, kb_rules=None, kb_laws=None):
+        async def _fake_dimension(
+            dim, clauses, llm, contract_type, kb_rules=None, kb_laws=None, memory_context=""
+        ):
             if dim == "equity":
                 return [ClauseRisk(clause_id="1", risk_level="red", risk_type="违约金过高", issue="年化超24%", severity=9, suggestion="降低比例", legal_basis="《合同法》")]
             elif dim == "financial":
@@ -283,7 +289,9 @@ class TestContractAgent:
         mock_parse.return_value = _mock_parse_result(clauses=clauses)
 
         # equity Worker 失败，其他正常
-        async def _fake_dimension(dim, clauses, llm, contract_type, kb_rules=None, kb_laws=None):
+        async def _fake_dimension(
+            dim, clauses, llm, contract_type, kb_rules=None, kb_laws=None, memory_context=""
+        ):
             if dim == "equity":
                 raise Exception("Worker 崩溃")
             return []

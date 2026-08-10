@@ -48,6 +48,18 @@ def _join_sections(*sections: str) -> str:
     return "\n\n".join(parts)
 
 
+def _retrieve_queries(contract_type: str, query: str) -> list[str]:
+    """生成短召回 query：合同类型优先，避免长全文无法关键词命中。"""
+    seen: set[str] = set()
+    out: list[str] = []
+    for q in (contract_type or "", (query or "").strip()[:40]):
+        q = q.strip()
+        if q and q not in seen:
+            seen.add(q)
+            out.append(q)
+    return out or [""]
+
+
 async def build_loadout(
     db: AsyncSession,
     *,
@@ -59,11 +71,17 @@ async def build_loadout(
         kernel = MemoryKernel(db)
         budget = RetrieveBudget.default()
         budget.max_l1 = 0  # 开场只取人格与场景
-        hits = await kernel.retrieve(
-            query or contract_type or "",
-            contract_type=contract_type or None,
-            budget=budget,
-        )
+        seen_ids: set[str] = set()
+        hits: list[MemoryHit] = []
+        for q in _retrieve_queries(contract_type, query):
+            for h in await kernel.retrieve(
+                q,
+                contract_type=contract_type or None,
+                budget=budget,
+            ):
+                if h.id not in seen_ids:
+                    seen_ids.add(h.id)
+                    hits.append(h)
         l3 = [h for h in hits if h.layer == "l3"]
         l2 = [h for h in hits if h.layer == "l2"]
         text = _join_sections(
@@ -90,11 +108,17 @@ async def build_stage_context(
         budget = RetrieveBudget.default()
         budget.max_l2 = 0
         budget.max_l3 = 0
-        hits = await kernel.retrieve(
-            query or contract_type or "",
-            contract_type=contract_type or None,
-            budget=budget,
-        )
+        seen_ids: set[str] = set()
+        hits: list[MemoryHit] = []
+        for q in _retrieve_queries(contract_type, query):
+            for h in await kernel.retrieve(
+                q,
+                contract_type=contract_type or None,
+                budget=budget,
+            ):
+                if h.id not in seen_ids:
+                    seen_ids.add(h.id)
+                    hits.append(h)
         atom_section = _format_hits(
             [h for h in hits if h.layer == "l1"],
             "原子记忆 (L1)",

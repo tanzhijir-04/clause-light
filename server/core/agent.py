@@ -48,6 +48,7 @@ class AnalysisResult:
     top_risks: list[str] = field(default_factory=list)
     ocr_text: str = ""  # 文档解析全文（AnyDoc/OCR；字段名保持兼容，供原文标注视图）
     error: str = ""  # 分析失败时的错误信息，调用方可据此判断成功/失败
+    session_id: str = ""  # L0 记忆会话 id（可选，旧客户端可忽略）
 
 
 # Worker 维度列表
@@ -176,13 +177,68 @@ class ContractAgent:
             # 确保回调被清除
             embedding._clear_progress_callback()
 
+        # ── 记忆会话 + Loadout / Stage 上下文（失败降级为空）──
+        memory_context = ""
+        try:
+            from server.core.agent_tools import build_loadout, build_stage_context
+            from server.core.memory.kernel import MemoryKernel
+
+            async with async_session_factory() as db:
+                kernel = MemoryKernel(db)
+                session_id = await kernel.start_session(
+                    contract_id, parse_result.contract_type
+                )
+                result.session_id = session_id
+                await kernel.append_event(
+                    session_id,
+                    "step",
+                    {
+                        "name": "parse_done",
+                        "clauses": len(parse_result.clauses),
+                        "contract_type": parse_result.contract_type,
+                    },
+                )
+                query_text = full_text[:500]
+                loadout = await build_loadout(
+                    db,
+                    contract_type=parse_result.contract_type,
+                    query=query_text,
+                )
+                stage = await build_stage_context(
+                    db,
+                    contract_type=parse_result.contract_type,
+                    query=query_text,
+                    kb_rules=kb_rules,
+                )
+                parts = [p for p in (loadout, stage) if p and p.strip()]
+                memory_context = "\n\n".join(parts)
+                await kernel.append_event(
+                    session_id,
+                    "step",
+                    {
+                        "name": "memory_loadout",
+                        "chars": len(memory_context),
+                    },
+                )
+                await db.commit()
+        except Exception as e:
+            logger.warning("记忆装配失败，降级为空上下文: %s", e)
+
         # ── Stage 2: 并行风险评估（含冲突解决） ──
         total_workers = len(DIMENSIONS)
         await _notify(3, 5, f"正在并行分析 {total_workers} 个维度...")
         logger.info("Stage 2: 并行风险评估 (%d 个 Worker)", total_workers)
 
         worker_tasks = [
-            analyze_dimension(dim, parse_result.clauses, self.llm, parse_result.contract_type, kb_rules, kb_laws)
+            analyze_dimension(
+                dim,
+                parse_result.clauses,
+                self.llm,
+                parse_result.contract_type,
+                kb_rules,
+                kb_laws,
+                memory_context=memory_context,
+            )
             for dim in DIMENSIONS
         ]
         worker_results = await asyncio.gather(*worker_tasks, return_exceptions=True)
