@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from server.core.agent import AnalysisResult, ContractAgent, TYPE_EN_MAP
+from server.core.document_ingress import DocumentResult
 from server.core.workers.parser import ClauseItem, ParseResult
 from server.core.workers.workers import ClauseRisk
 from server.core.workers.evaluator import EvaluationResult
@@ -53,12 +54,14 @@ class TestTypeEnMap:
         assert TYPE_EN_MAP.get("未知类型", "other") == "other"
 
 
-def _make_ocr_result(text: str, confidence: float = 0.95):
-    """创建 OCR 结果 mock"""
-    mock = MagicMock()
-    mock.full_text = text
-    mock.confidence_avg = confidence
-    return mock
+def _make_doc_result(text: str, confidence: float = 0.95, source: str = "paddle") -> DocumentResult:
+    """创建 DocumentIngress 结果"""
+    return DocumentResult(
+        full_text=text,
+        markdown=text,
+        source=source,
+        confidence_avg=confidence,
+    )
 
 
 def _mock_parse_result(contract_type="租赁合同", clauses=None):
@@ -94,30 +97,33 @@ class TestContractAgent:
         self.mock_ocr = MagicMock()
         self.agent = ContractAgent(llm=self.mock_llm, ocr=self.mock_ocr)
 
-    async def test_analyze_empty_ocr(self):
-        """测试 OCR 返回空结果"""
-        self.mock_ocr.recognize = AsyncMock(return_value=_make_ocr_result(""))
+    @patch("server.core.agent.document_ingress.ingest", new_callable=AsyncMock)
+    async def test_analyze_empty_ocr(self, mock_ingest):
+        """测试文档解析返回空结果"""
+        mock_ingest.return_value = _make_doc_result("")
 
         result = await self.agent.analyze(file_path="test.pdf")
         assert result.contract_id == ""
+        assert "为空" in result.error
 
     @patch("server.core.agent.evaluate")
     @patch("server.core.agent.analyze_dimension")
     @patch("server.core.agent.parse_contract")
     @patch("server.core.agent.async_session_factory")
+    @patch("server.core.agent.document_ingress.ingest", new_callable=AsyncMock)
     async def test_analyze_with_text(
-        self, mock_factory, mock_parse, mock_dimension, mock_evaluate
+        self, mock_ingest, mock_factory, mock_parse, mock_dimension, mock_evaluate
     ):
         """测试正常分析流程"""
-        self.mock_ocr.recognize = AsyncMock(
-            return_value=_make_ocr_result("租赁合同\n甲方：张三\n乙方：李四\n第一条 租赁期限")
+        mock_ingest.return_value = _make_doc_result(
+            "租赁合同\n甲方：张三\n乙方：李四\n第一条 租赁期限"
         )
 
         # Stage 1: parse_contract
         mock_parse.return_value = _mock_parse_result()
 
         # Stage 2: analyze_dimension (5 个维度并行)
-        async def _fake_dimension(dim, clauses, llm, contract_type, kb_rules=None):
+        async def _fake_dimension(dim, clauses, llm, contract_type, kb_rules=None, kb_laws=None):
             if dim == "equity":
                 return [ClauseRisk(clause_id="1", risk_level="green", issue="正常条款", severity=1)]
             elif dim == "dispute":
@@ -139,25 +145,25 @@ class TestContractAgent:
         assert result.overall_score == 85
         assert result.contract_type == "租赁合同"
         assert len(result.clauses) >= 1
-        # 验证 parse_contract 被调用
+        assert "租赁合同" in result.ocr_text
         mock_parse.assert_called_once()
+        mock_ingest.assert_called()
 
     @patch("server.core.agent.evaluate")
     @patch("server.core.agent.analyze_dimension")
     @patch("server.core.agent.parse_contract")
     @patch("server.core.agent.async_session_factory")
+    @patch("server.core.agent.document_ingress.ingest", new_callable=AsyncMock)
     async def test_analyze_with_hint(
-        self, mock_factory, mock_parse, mock_dimension, mock_evaluate
+        self, mock_ingest, mock_factory, mock_parse, mock_dimension, mock_evaluate
     ):
         """测试带类型提示"""
-        self.mock_ocr.recognize = AsyncMock(
-            return_value=_make_ocr_result("劳动合同内容...")
-        )
+        mock_ingest.return_value = _make_doc_result("劳动合同内容...")
 
         clauses = [ClauseItem(id="1", type="other", title="试用期", text="试用期三个月", relevance=["general"])]
         mock_parse.return_value = _mock_parse_result(contract_type="劳动合同", clauses=clauses)
 
-        async def _fake_dimension(dim, clauses, llm, contract_type, kb_rules=None):
+        async def _fake_dimension(dim, clauses, llm, contract_type, kb_rules=None, kb_laws=None):
             if dim == "general":
                 return [ClauseRisk(clause_id="1", risk_level="yellow", risk_type="试用期过长", issue="试用期超过法定上限", severity=6, suggestion="缩短试用期", legal_basis="《劳动合同法》")]
             return []
@@ -181,13 +187,12 @@ class TestContractAgent:
     @patch("server.core.agent.analyze_dimension")
     @patch("server.core.agent.parse_contract")
     @patch("server.core.agent.async_session_factory")
+    @patch("server.core.agent.document_ingress.ingest", new_callable=AsyncMock)
     async def test_analyze_llm_failure_fallback(
-        self, mock_factory, mock_parse, mock_dimension, mock_evaluate
+        self, mock_ingest, mock_factory, mock_parse, mock_dimension, mock_evaluate
     ):
         """测试 LLM 完全失败时的兜底行为"""
-        self.mock_ocr.recognize = AsyncMock(
-            return_value=_make_ocr_result("合同内容")
-        )
+        mock_ingest.return_value = _make_doc_result("合同内容")
 
         # Stage 1 失败
         mock_parse.side_effect = Exception("LLM 不可用")
@@ -202,35 +207,35 @@ class TestContractAgent:
         assert len(result.clauses) > 0, "LLM 失败时条款不应丢失"
         assert result.clauses[0]["risk_level"] == "green"
 
-    async def test_analyze_step_callback(self):
+    @patch("server.core.agent.document_ingress.ingest", new_callable=AsyncMock)
+    async def test_analyze_step_callback(self, mock_ingest):
         """测试步骤回调"""
-        self.mock_ocr.recognize = AsyncMock(
-            return_value=_make_ocr_result("")
-        )
+        mock_ingest.return_value = _make_doc_result("")
 
         callback = AsyncMock()
         result = await self.agent.analyze(file_path="test.pdf", on_step=callback)
 
         callback.assert_called_once()
 
-    async def test_analyze_ocr_exception(self):
-        """测试 OCR 异常处理"""
-        self.mock_ocr.recognize = AsyncMock(side_effect=Exception("OCR 崩溃"))
+    @patch("server.core.agent.document_ingress.ingest", new_callable=AsyncMock)
+    async def test_analyze_ocr_exception(self, mock_ingest):
+        """测试文档解析异常处理"""
+        mock_ingest.side_effect = Exception("解析崩溃")
 
         result = await self.agent.analyze(file_path="test.pdf")
         assert result.contract_id == ""
+        assert "文档解析失败" in result.error
 
     @patch("server.core.agent.evaluate")
     @patch("server.core.agent.analyze_dimension")
     @patch("server.core.agent.parse_contract")
     @patch("server.core.agent.async_session_factory")
+    @patch("server.core.agent.document_ingress.ingest", new_callable=AsyncMock)
     async def test_analyze_risk_distribution(
-        self, mock_factory, mock_parse, mock_dimension, mock_evaluate
+        self, mock_ingest, mock_factory, mock_parse, mock_dimension, mock_evaluate
     ):
         """测试风险分布统计"""
-        self.mock_ocr.recognize = AsyncMock(
-            return_value=_make_ocr_result("合同内容")
-        )
+        mock_ingest.return_value = _make_doc_result("合同内容")
 
         clauses = [
             ClauseItem(id="1", type="penalty", title="违约金", text="违约金50%", relevance=["equity", "financial"]),
@@ -238,7 +243,7 @@ class TestContractAgent:
         ]
         mock_parse.return_value = _mock_parse_result(clauses=clauses)
 
-        async def _fake_dimension(dim, clauses, llm, contract_type, kb_rules=None):
+        async def _fake_dimension(dim, clauses, llm, contract_type, kb_rules=None, kb_laws=None):
             if dim == "equity":
                 return [ClauseRisk(clause_id="1", risk_level="red", risk_type="违约金过高", issue="年化超24%", severity=9, suggestion="降低比例", legal_basis="《合同法》")]
             elif dim == "financial":
@@ -267,19 +272,18 @@ class TestContractAgent:
     @patch("server.core.agent.analyze_dimension")
     @patch("server.core.agent.parse_contract")
     @patch("server.core.agent.async_session_factory")
+    @patch("server.core.agent.document_ingress.ingest", new_callable=AsyncMock)
     async def test_analyze_worker_failure_graceful(
-        self, mock_factory, mock_parse, mock_dimension, mock_evaluate
+        self, mock_ingest, mock_factory, mock_parse, mock_dimension, mock_evaluate
     ):
         """测试单个 Worker 失败时的优雅降级"""
-        self.mock_ocr.recognize = AsyncMock(
-            return_value=_make_ocr_result("合同内容")
-        )
+        mock_ingest.return_value = _make_doc_result("合同内容")
 
         clauses = [ClauseItem(id="1", type="penalty", title="违约金", text="违约金50%", relevance=["equity", "financial"])]
         mock_parse.return_value = _mock_parse_result(clauses=clauses)
 
         # equity Worker 失败，其他正常
-        async def _fake_dimension(dim, clauses, llm, contract_type, kb_rules=None):
+        async def _fake_dimension(dim, clauses, llm, contract_type, kb_rules=None, kb_laws=None):
             if dim == "equity":
                 raise Exception("Worker 崩溃")
             return []
@@ -296,3 +300,33 @@ class TestContractAgent:
         # equity Worker 失败，但其他 Worker 和整体流程应继续
         assert len(result.clauses) >= 1
         assert result.contract_type == "租赁合同"
+
+    @patch("server.core.agent.evaluate")
+    @patch("server.core.agent.analyze_dimension")
+    @patch("server.core.agent.parse_contract")
+    @patch("server.core.agent.async_session_factory")
+    @patch("server.core.agent.document_ingress.ingest", new_callable=AsyncMock)
+    async def test_analyze_docx_via_ingest(
+        self, mock_ingest, mock_factory, mock_parse, mock_dimension, mock_evaluate
+    ):
+        """测试 .docx 走 document_ingress（mock），ocr_text 仍填充"""
+        mock_ingest.return_value = _make_doc_result(
+            "# 租赁合同\n条款一", confidence=1.0, source="anydoc"
+        )
+        mock_parse.return_value = _mock_parse_result()
+        mock_dimension.return_value = []
+        mock_evaluate.return_value = _mock_eval_result()
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_factory.return_value = mock_session
+
+        result = await self.agent.analyze(file_path="contract.docx")
+        assert "条款一" in result.ocr_text
+        mock_ingest.assert_called()
+        # _retry 经 lambda 调用 ingest(file_path)
+        assert any(
+            "contract.docx" in str(c)
+            for c in mock_ingest.call_args_list
+        )

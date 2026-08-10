@@ -27,6 +27,11 @@ OFFICE_EXTENSIONS = {
 }
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp"}
 PDF_EXTENSIONS = {".pdf"}
+# 纯文本（WebSocket 手机端先落盘为 .txt 再走分析）
+TEXT_EXTENSIONS = {".txt", ".md"}
+
+# 上传白名单：办公文档 + 图片 + PDF（不含纯文本，文本走 WS）
+ALLOWED_UPLOAD_EXTENSIONS = OFFICE_EXTENSIONS | IMAGE_EXTENSIONS | PDF_EXTENSIONS
 
 
 @dataclass
@@ -162,6 +167,7 @@ async def ingest(path: str, force_route: str | None = None) -> DocumentResult:
     统一文档入口。
 
     路由：
+    - TEXT (.txt/.md) → 直接读文件 → source=text
     - IMAGE → OCREngine.recognize → source=paddle
     - OFFICE → AnyDoc → source=anydoc
     - PDF → AnyDoc / PyMuPDF 探文字；不足则 Paddle；可 hybrid
@@ -179,6 +185,14 @@ async def ingest(path: str, force_route: str | None = None) -> DocumentResult:
     if force_route is not None:
         raise ValueError(f"未知 force_route: {force_route}")
 
+    if suffix in TEXT_EXTENSIONS:
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+        return DocumentResult(
+            full_text=text,
+            markdown=text,
+            source="text",
+            confidence_avg=1.0,
+        )
     if suffix in IMAGE_EXTENSIONS:
         return await _from_paddle(path)
     if suffix in OFFICE_EXTENSIONS:

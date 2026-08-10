@@ -8,6 +8,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Callable
 
+from server.core import document_ingress
 from server.core.knowledge import KnowledgeEngine
 from server.core.llm import LLMGateway, get_llm_gateway
 from server.core.ocr import OCREngine, get_ocr_engine
@@ -45,7 +46,7 @@ class AnalysisResult:
     green_count: int = 0
     needs_review: list[str] = field(default_factory=list)
     top_risks: list[str] = field(default_factory=list)
-    ocr_text: str = ""  # OCR 识别的合同全文（用于原文标注视图）
+    ocr_text: str = ""  # 文档解析全文（AnyDoc/OCR；字段名保持兼容，供原文标注视图）
     error: str = ""  # 分析失败时的错误信息，调用方可据此判断成功/失败
 
 
@@ -62,6 +63,7 @@ class ContractAgent:
         ocr: OCREngine | None = None,
     ) -> None:
         self.llm = llm or get_llm_gateway()
+        # 保留 ocr 参数以兼容旧调用方；解析统一走 document_ingress
         self.ocr = ocr or get_ocr_engine()
 
     async def analyze(
@@ -82,26 +84,29 @@ class ContractAgent:
         result = AnalysisResult()
         contract_id = uuid.uuid4().hex
 
-        # ── OCR 识别 ──
+        # ── 文档解析（AnyDoc / PaddleOCR / 纯文本）──
         await _notify(1, 5, "正在识别文字...")
-        logger.info("OCR 识别开始")
+        logger.info("文档解析开始")
         try:
-            ocr_result = await self._retry(
-                lambda: self.ocr.recognize(file_path), "OCR 识别"
+            doc_result = await self._retry(
+                lambda: document_ingress.ingest(file_path), "文档解析"
             )
-            if not ocr_result or not ocr_result.full_text.strip():
-                logger.error("OCR 识别结果为空")
-                result.error = "OCR 识别结果为空，无法分析"
+            if not doc_result or not doc_result.full_text.strip():
+                logger.error("文档解析结果为空")
+                result.error = "文档解析结果为空，无法分析"
                 return result
-            full_text = ocr_result.full_text
-            result.ocr_text = full_text  # 保存原文供前端标注视图使用
+            full_text = doc_result.full_text
+            result.ocr_text = full_text  # 字段名保持 ocr_text，内容可为 Markdown
 
-            # 检查 OCR 质量
-            if ocr_result.confidence_avg < 0.7:
-                logger.warning("OCR 置信度较低: %.2f", ocr_result.confidence_avg)
+            if doc_result.confidence_avg < 0.7:
+                logger.warning(
+                    "文档解析置信度较低: %.2f (source=%s)",
+                    doc_result.confidence_avg,
+                    doc_result.source,
+                )
         except Exception as e:
-            logger.error("OCR 识别失败: %s", e)
-            result.error = f"OCR 识别失败: {e}"
+            logger.error("文档解析失败: %s", e)
+            result.error = f"文档解析失败: {e}"
             return result
 
         # ── Stage 1: 结构解析 ──

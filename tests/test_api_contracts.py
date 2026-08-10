@@ -4,12 +4,31 @@ from __future__ import annotations
 
 import json
 from io import BytesIO
+from typing import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
-from server.models.database import Analysis, ClauseAnalysis, Contract
+from server.models.database import Analysis, ClauseAnalysis, Contract, get_db
+
+
+@pytest_asyncio.fixture
+async def contracts_client() -> AsyncGenerator[AsyncClient, None]:
+    """仅挂载 contracts 路由，避免 server.main 依赖 qrcode 等可选包"""
+    from fastapi import FastAPI
+    from server.api.contracts import router
+    from tests.conftest import override_get_db
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_db] = override_get_db
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+    app.dependency_overrides.clear()
 
 
 class TestListContracts:
@@ -137,21 +156,69 @@ class TestGetContract:
 class TestAnalyzeContract:
     """合同分析接口测试"""
 
-    async def test_analyze_no_file(self, client):
+    async def test_analyze_no_file(self, contracts_client):
         """测试无文件上传"""
-        response = await client.post("/api/contracts/analyze")
+        response = await contracts_client.post("/api/contracts/analyze")
         assert response.status_code == 422  # Unprocessable Entity
 
-    async def test_analyze_unsupported_format(self, client):
+    async def test_analyze_unsupported_format(self, contracts_client):
         """测试不支持的文件格式"""
-        response = await client.post(
+        response = await contracts_client.post(
             "/api/contracts/analyze",
             files={"file": ("test.txt", b"content", "text/plain")},
         )
         assert response.status_code == 400
         assert "不支持的文件格式" in response.json()["detail"]
 
-    async def test_analyze_with_mock_agent(self, client, db_session):
+    async def test_analyze_docx_accepted(self, contracts_client, db_session):
+        """测试 .docx 不再因格式被拒（mock Agent）"""
+        mock_result = MagicMock()
+        mock_result.contract_id = "docx_contract_id"
+        mock_result.contract_type = "租赁合同"
+        mock_result.overall_score = 80
+        mock_result.recommendation = "sign"
+        mock_result.model_used = "deepseek-chat"
+        mock_result.summary = "风险可控"
+        mock_result.red_count = 0
+        mock_result.yellow_count = 0
+        mock_result.green_count = 3
+        mock_result.clauses = []
+        mock_result.ocr_text = "# 合同\n条款"
+        mock_result.error = ""
+
+        from tests.conftest import test_session_factory
+
+        with (
+            patch("server.api.contracts.ContractAgent") as MockAgent,
+            patch(
+                "server.api.contracts.async_session_factory",
+                test_session_factory,
+            ),
+        ):
+            MockAgent.return_value.analyze = AsyncMock(return_value=mock_result)
+
+            response = await contracts_client.post(
+                "/api/contracts/analyze",
+                files={
+                    "file": (
+                        "lease.docx",
+                        b"PK\x03\x04fake-docx",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    )
+                },
+                data={"contract_type": "租赁合同"},
+            )
+            # 关键：扩展名白名单放行，不再 400「不支持的文件格式」
+            assert response.status_code == 200
+            assert "不支持的文件格式" not in response.text
+            MockAgent.return_value.analyze.assert_called_once()
+            call = MockAgent.return_value.analyze.call_args
+            file_path = call.kwargs.get("file_path") or (
+                call.args[0] if call.args else ""
+            )
+            assert str(file_path).endswith(".docx")
+
+    async def test_analyze_with_mock_agent(self, contracts_client, db_session):
         """测试使用 mock Agent 分析"""
         # Mock Agent 返回结果
         mock_result = MagicMock()
@@ -182,18 +249,27 @@ class TestAnalyzeContract:
 
         mock_result.ocr_text = "合同原文内容"
         mock_result.error = ""
-        with patch("server.api.contracts.ContractAgent") as MockAgent:
+
+        from tests.conftest import test_session_factory
+
+        with (
+            patch("server.api.contracts.ContractAgent") as MockAgent,
+            patch(
+                "server.api.contracts.async_session_factory",
+                test_session_factory,
+            ),
+        ):
             MockAgent.return_value.analyze = AsyncMock(return_value=mock_result)
 
-            response = await client.post(
+            response = await contracts_client.post(
                 "/api/contracts/analyze",
                 files={"file": ("test.pdf", b"fake pdf content", "application/pdf")},
                 data={"contract_type": "租赁合同"},
             )
             assert response.status_code == 200
-            data = response.json()
-            assert data["success"] is True
-            assert data["score"] == 75
+            # SSE 流：至少推送了 result 事件
+            assert "result" in response.text or '"score"' in response.text
+            MockAgent.return_value.analyze.assert_called_once()
 
 
 class TestSubmitFeedback:

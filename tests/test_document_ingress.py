@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from server.core.document_ingress import DocumentResult, OFFICE_EXTENSIONS
+from server.core.document_ingress import DocumentResult, OFFICE_EXTENSIONS, ALLOWED_UPLOAD_EXTENSIONS
 from server.core.ocr import OCRResult
 
 
@@ -19,6 +19,15 @@ def test_document_result_fields():
     )
     assert r.source == "anydoc"
     assert ".docx" in OFFICE_EXTENSIONS
+
+
+def test_allowed_upload_includes_office_and_images():
+    """上传白名单覆盖办公文档 + 图片扩展（含 webp/tif）"""
+    assert ".docx" in ALLOWED_UPLOAD_EXTENSIONS
+    assert ".pdf" in ALLOWED_UPLOAD_EXTENSIONS
+    assert ".webp" in ALLOWED_UPLOAD_EXTENSIONS
+    assert ".tif" in ALLOWED_UPLOAD_EXTENSIONS
+    assert ".txt" not in ALLOWED_UPLOAD_EXTENSIONS  # 纯文本走 WS，不经 HTTP 上传白名单
 
 
 @pytest.mark.asyncio

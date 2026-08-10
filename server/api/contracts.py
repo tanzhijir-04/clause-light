@@ -16,8 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.config import TYPE_EN_MAP, settings
 from server.core.agent import ContractAgent
+from server.core.document_ingress import ALLOWED_UPLOAD_EXTENSIONS
 from server.core.llm import get_llm_gateway
-from server.core.ocr import get_ocr_engine
 from server.models.database import (
     Analysis,
     AsyncSession,
@@ -194,8 +194,11 @@ async def analyze_contract(
         raise HTTPException(status_code=400, detail="文件名为空")
 
     ext = os.path.splitext(file.filename)[1].lower()
-    if ext not in (".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".tiff"):
-        raise HTTPException(status_code=400, detail="不支持的文件格式，请上传 PDF 或图片")
+    if ext not in ALLOWED_UPLOAD_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail="不支持的文件格式，请上传 PDF、办公文档（如 Word/Excel）或图片",
+        )
 
     # 保存文件
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
