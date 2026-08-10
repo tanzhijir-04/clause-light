@@ -46,6 +46,14 @@ class Settings(BaseSettings):
     S3_SECRET_KEY: str = ""
     S3_BUCKET: str = ""
 
+    # ── 分层记忆 ──
+    MEMORY_RETRIEVE_CHAR_BUDGET: int = 3000
+    MEMORY_MAX_L1: int = 8
+    MEMORY_MAX_L2: int = 2
+    MEMORY_MAX_L3: int = 3
+    MEMORY_RETRIEVE_TIMEOUT_SEC: float = 3.0
+    MEMORY_AUTO_ACTIVATE_THRESHOLD: float = 0.75
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 
