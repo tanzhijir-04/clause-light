@@ -76,26 +76,52 @@ async def search_pages(
     q: str,
     limit: int = 5,
 ) -> list[WikiPage]:
-    """关键词搜索 active Wiki 页面（title/body 子串匹配）"""
+    """搜索 active Wiki 页面：可选 LightRAG 优先，始终保留关键词兜底"""
+    from server.config import settings
+
     stmt = select(WikiPage).where(WikiPage.status == "active")
     result = await db.execute(stmt)
     pages = list(result.scalars().all())
+    by_slug = {p.slug: p for p in pages}
 
     query = (q or "").strip().lower()
     if not query:
         return pages[: max(1, limit)]
 
-    hits: list[tuple[int, WikiPage]] = []
+    # 关键词路径（始终保留）
+    keyword_hits: list[tuple[int, WikiPage]] = []
     for page in pages:
         blob = f"{page.title or ''} {page.body or ''}".lower()
         if query not in blob:
             continue
         # 标题命中加权
         score = 2 if query in (page.title or "").lower() else 1
-        hits.append((score, page))
+        keyword_hits.append((score, page))
+    keyword_hits.sort(key=lambda x: x[0], reverse=True)
+    keyword_pages = [p for _, p in keyword_hits]
 
-    hits.sort(key=lambda x: x[0], reverse=True)
-    return [p for _, p in hits[: max(1, limit)]]
+    # 可选 LightRAG：命中 slug 前置合并，失败则仅用关键词
+    rag_pages: list[WikiPage] = []
+    if settings.LIGHT_RAG_ENABLED:
+        try:
+            from server.core.wiki.lightrag_adapter import search as lightrag_search
+
+            for slug in await lightrag_search(q):
+                page = by_slug.get(slug)
+                if page is not None:
+                    rag_pages.append(page)
+        except Exception:
+            logger.warning("LightRAG 检索失败，回退关键词路径", exc_info=True)
+
+    merged: list[WikiPage] = []
+    seen: set[str] = set()
+    for page in rag_pages + keyword_pages:
+        if page.slug in seen:
+            continue
+        seen.add(page.slug)
+        merged.append(page)
+
+    return merged[: max(1, limit)]
 
 
 async def get_page(
