@@ -212,7 +212,9 @@ class OCREngine:
         return file_path.lower().endswith(".pdf")
 
     def _is_image(self, file_path: str) -> bool:
-        return file_path.lower().endswith((".png", ".jpg", ".jpeg", ".bmp", ".tiff"))
+        return file_path.lower().endswith(
+            (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp")
+        )
 
     async def recognize(self, file_path: str) -> OCRResult:
         """

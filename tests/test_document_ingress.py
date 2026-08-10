@@ -69,6 +69,28 @@ async def test_image_routes_to_paddle(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["scan.webp", "scan.tif"])
+async def test_webp_tif_routes_to_paddle(tmp_path, monkeypatch, name):
+    """webp/tif 必须进入 Paddle，且 OCREngine 识别为图片（修复白名单不一致）"""
+    f = tmp_path / name
+    f.write_bytes(b"fake-image-bytes")
+    from server.core import document_ingress as di
+    from server.core.ocr import OCREngine
+
+    assert OCREngine()._is_image(str(f)) is True
+
+    mock_engine = MagicMock()
+    mock_engine.recognize = AsyncMock(
+        return_value=OCRResult(full_text="webp条款", confidence_avg=0.8)
+    )
+    monkeypatch.setattr(di, "get_ocr_engine", lambda: mock_engine)
+
+    result = await di.ingest(str(f))
+    assert result.source == "paddle"
+    assert "webp条款" in result.full_text
+
+
+@pytest.mark.asyncio
 async def test_docx_routes_to_anydoc(tmp_path, monkeypatch):
     f = tmp_path / "contract.docx"
     f.write_bytes(b"PK\x03\x04fake")
