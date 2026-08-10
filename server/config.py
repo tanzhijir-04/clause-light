@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     MEMORY_RETRIEVE_TIMEOUT_SEC: float = 3.0
     MEMORY_AUTO_ACTIVATE_THRESHOLD: float = 0.75
 
+    # ── Outlines 结构化输出（失败自动回退 parse_json）──
+    OUTLINES_ENABLED: bool = True
+
     # ── LightRAG（Wiki/法规图检索，默认可关）──
     LIGHT_RAG_ENABLED: bool = False
 

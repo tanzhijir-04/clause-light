@@ -8,14 +8,17 @@ import logging
 import os
 import re
 import time
-from dataclasses import dataclass, field
-from typing import AsyncGenerator
+from dataclasses import dataclass
+from typing import AsyncGenerator, TypeVar
 
 from openai import AsyncOpenAI
+from pydantic import BaseModel, ValidationError
 
 from server.config import settings
 
 logger = logging.getLogger(__name__)
+
+TModel = TypeVar("TModel", bound=BaseModel)
 
 
 # ── 响应数据 ──
@@ -30,6 +33,14 @@ class LLMResponse:
     provider: str = ""
     tokens_used: int = 0
     latency_ms: int = 0
+
+
+@dataclass
+class StructuredLLMResponse(LLMResponse):
+    """结构化 LLM 调用结果"""
+
+    parsed: BaseModel | None = None
+    via: str = "fallback"  # outlines | json_schema | fallback
 
 
 # ── 硬编码映射（仅作 fallback，优先级最低） ──
@@ -296,6 +307,163 @@ class LLMGateway:
 
         logger.error("所有 LLM 提供商均失败: %s", last_error)
         return LLMResponse(content="", model="", provider="", tokens_used=0, latency_ms=0)
+
+    async def chat_structured(
+        self,
+        messages: list[dict],
+        schema: type[TModel],
+        task: str,
+        temperature: float = 0.1,
+        max_retries: int = 2,
+    ) -> StructuredLLMResponse:
+        """
+        结构化输出：优先 Outlines（OpenAI 兼容 json_schema），
+        失败则回退 chat + parse_json + Pydantic 校验。
+        Worker 禁止直接 import outlines，一律走本方法。
+        """
+        empty = StructuredLLMResponse(content="", parsed=None, via="fallback")
+
+        if settings.OUTLINES_ENABLED:
+            outlines_result = await self._chat_via_outlines(
+                messages, schema, task, temperature
+            )
+            if outlines_result.parsed is not None:
+                return outlines_result
+            logger.warning(
+                "Outlines 结构化调用未成功，回退 parse_json: task=%s", task
+            )
+
+        # 回退：普通 chat + 校验（可多试一次）
+        last: StructuredLLMResponse = empty
+        for attempt in range(max_retries + 1):
+            resp = await self.chat(
+                messages,
+                task=task,
+                temperature=temperature if attempt == 0 else min(temperature + 0.1, 0.5),
+                max_retries=0,
+            )
+            if not resp.content:
+                last = StructuredLLMResponse(
+                    content="",
+                    model=resp.model,
+                    provider=resp.provider,
+                    tokens_used=resp.tokens_used,
+                    latency_ms=resp.latency_ms,
+                    parsed=None,
+                    via="fallback",
+                )
+                continue
+            parsed = self._validate_schema(resp.content, schema)
+            last = StructuredLLMResponse(
+                content=resp.content,
+                model=resp.model,
+                provider=resp.provider,
+                tokens_used=resp.tokens_used,
+                latency_ms=resp.latency_ms,
+                parsed=parsed,
+                via="fallback",
+            )
+            if parsed is not None:
+                return last
+        return last
+
+    async def _chat_via_outlines(
+        self,
+        messages: list[dict],
+        schema: type[TModel],
+        task: str,
+        temperature: float,
+    ) -> StructuredLLMResponse:
+        """经 Outlines + AsyncOpenAI 客户端做结构化生成"""
+        try:
+            import outlines
+            from outlines.inputs import Chat
+        except ImportError as exc:
+            logger.warning("outlines 未安装，跳过结构化路径: %s", exc)
+            return StructuredLLMResponse(parsed=None, via="outlines")
+
+        providers = self._get_available_providers()
+        if not providers:
+            return StructuredLLMResponse(parsed=None, via="outlines")
+
+        last_error: Exception | None = None
+        for provider in providers:
+            client = self._clients.get(provider)
+            if not client:
+                continue
+            model_name = self._get_model(provider, task)
+            start = time.monotonic()
+            try:
+                omodel = outlines.from_openai(client, model_name)
+                chat_input = Chat(messages)
+                raw = await omodel(chat_input, schema, temperature=temperature)
+                latency = int((time.monotonic() - start) * 1000)
+
+                if isinstance(raw, BaseModel):
+                    content = raw.model_dump_json()
+                    parsed: BaseModel | None = raw
+                elif isinstance(raw, str):
+                    content = raw
+                    parsed = self._validate_schema(raw, schema)
+                else:
+                    content = json.dumps(raw, ensure_ascii=False)
+                    parsed = self._validate_schema(content, schema)
+
+                if parsed is None:
+                    logger.warning(
+                        "Outlines 返回无法校验: provider=%s model=%s",
+                        provider,
+                        model_name,
+                    )
+                    continue
+
+                logger.info(
+                    "Outlines 结构化成功: provider=%s model=%s task=%s latency=%dms",
+                    provider,
+                    model_name,
+                    task,
+                    latency,
+                )
+                return StructuredLLMResponse(
+                    content=content,
+                    model=model_name,
+                    provider=provider,
+                    latency_ms=latency,
+                    parsed=parsed,
+                    via="outlines",
+                )
+            except Exception as e:
+                last_error = e
+                logger.warning(
+                    "Outlines 调用失败: provider=%s model=%s error=%s",
+                    provider,
+                    model_name,
+                    e,
+                )
+                continue
+
+        if last_error:
+            logger.warning("Outlines 全部提供商失败: %s", last_error)
+        return StructuredLLMResponse(parsed=None, via="outlines")
+
+    def _validate_schema(
+        self, content: str, schema: type[TModel]
+    ) -> TModel | None:
+        """parse_json + Pydantic model_validate"""
+        data = self.parse_json(content)
+        if data is None:
+            return None
+        try:
+            if isinstance(data, list):
+                # 允许裸数组：若 schema 有单一 list 字段则包装
+                fields = getattr(schema, "model_fields", {})
+                if len(fields) == 1:
+                    only = next(iter(fields))
+                    return schema.model_validate({only: data})
+            return schema.model_validate(data)
+        except ValidationError as e:
+            logger.warning("Schema 校验失败: %s", e)
+            return None
 
     async def chat_stream(
         self,
