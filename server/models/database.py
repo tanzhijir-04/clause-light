@@ -136,6 +136,94 @@ class SyncLog(Base):
     created_at = Column(DateTime, default=func.now())
 
 
+# ── 分层记忆 L0–L3 ──
+
+
+class MemorySession(Base):
+    """L0 记忆会话"""
+
+    __tablename__ = "memory_sessions"
+
+    id = Column(String, primary_key=True)
+    contract_id = Column(String, nullable=True)
+    contract_type = Column(String, nullable=True)
+    status = Column(String, default="open")  # open|closed
+    created_at = Column(DateTime, default=func.now())
+    closed_at = Column(DateTime, nullable=True)
+
+
+class MemoryEvent(Base):
+    """L0 记忆事件流"""
+
+    __tablename__ = "memory_events"
+
+    id = Column(String, primary_key=True)
+    session_id = Column(String, nullable=False, index=True)
+    event_type = Column(String, nullable=False)  # step|feedback|tool|system
+    payload = Column(Text, nullable=False)  # JSON
+    created_at = Column(DateTime, default=func.now())
+
+
+class MemoryAtom(Base):
+    """L1 记忆原子（事实/偏好/约束）"""
+
+    __tablename__ = "memory_atoms"
+
+    id = Column(String, primary_key=True)
+    session_id = Column(String, nullable=True)
+    content = Column(Text, nullable=False)
+    kind = Column(String, default="fact")  # fact|preference|constraint|event
+    contract_type = Column(String, nullable=True)
+    confidence = Column(Float, default=0.5)
+    status = Column(String, default="pending")  # pending|active|disabled|rolled_back
+    embedding = Column(Text, nullable=True)
+    confirm_count = Column(Integer, default=0)
+    reject_count = Column(Integer, default=0)
+    owner_user_id = Column(String, default="local")
+    visibility = Column(String, default="private")  # private|team|restricted
+    acl_json = Column(Text, nullable=True)  # JSON list of grants
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+
+class MemoryScenario(Base):
+    """L2 情景记忆"""
+
+    __tablename__ = "memory_scenarios"
+
+    id = Column(String, primary_key=True)
+    title = Column(String, nullable=False)
+    summary = Column(Text, nullable=False)
+    contract_type = Column(String, nullable=True)
+    atom_ids = Column(Text, nullable=True)  # JSON list
+    confidence = Column(Float, default=0.5)
+    status = Column(String, default="pending")
+    embedding = Column(Text, nullable=True)
+    owner_user_id = Column(String, default="local")
+    visibility = Column(String, default="private")
+    acl_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+
+class MemoryPersona(Base):
+    """L3 人格/长期偏好画像"""
+
+    __tablename__ = "memory_personas"
+
+    id = Column(String, primary_key=True)
+    title = Column(String, nullable=False)
+    summary = Column(Text, nullable=False)
+    confidence = Column(Float, default=0.5)
+    status = Column(String, default="pending")
+    embedding = Column(Text, nullable=True)
+    owner_user_id = Column(String, default="local")
+    visibility = Column(String, default="private")
+    acl_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+
 # ── 数据库引擎 ──
 
 engine = create_async_engine(settings.DATABASE_URL, echo=settings.DEBUG)
