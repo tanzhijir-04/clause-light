@@ -465,13 +465,15 @@ class TestKnowledgeApproveReject:
     """知识库审核测试"""
 
     async def test_approve_rule(self, db_session):
-        """测试通过规则"""
+        """测试通过规则 → status=active 且 is_active=True"""
         rule = KnowledgeRule(
             id="pending_rule_1",
             category="租赁",
             rule_text="待审核规则",
             confidence=0.5,
             source="auto_learned",
+            status="pending",
+            is_active=False,
         )
         db_session.add(rule)
         await db_session.commit()
@@ -484,6 +486,37 @@ class TestKnowledgeApproveReject:
         approved = result.scalar_one_or_none()
         assert approved.confidence == 0.7  # 0.5 + 0.2
         assert approved.source == "manual"
+        assert approved.status == "active"
+        assert approved.is_active is True
+
+    async def test_get_pending_includes_status_pending(self, db_session):
+        """get_pending 应按 status=pending 筛选"""
+        pending = KnowledgeRule(
+            id="gp_pending",
+            category="租赁",
+            rule_text="待审高置信",
+            confidence=0.9,
+            source="auto_learned",
+            status="pending",
+            is_active=False,
+        )
+        active = KnowledgeRule(
+            id="gp_active",
+            category="租赁",
+            rule_text="已上线",
+            confidence=0.4,
+            source="auto_learned",
+            status="active",
+            is_active=True,
+        )
+        db_session.add_all([pending, active])
+        await db_session.commit()
+
+        engine = KnowledgeEngine(db_session)
+        rows = await engine.get_pending()
+        ids = {r["id"] for r in rows}
+        assert "gp_pending" in ids
+        assert "gp_active" not in ids
 
     async def test_reject_rule(self, db_session):
         """测试拒绝规则"""

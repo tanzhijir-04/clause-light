@@ -106,3 +106,57 @@ async def test_approve_and_reject(db_session):
     rule = await db_session.get(KnowledgeRule, "r3")
     assert rule.status == "disabled"
     assert rule.is_active is False
+
+
+@pytest.mark.asyncio
+async def test_maybe_activate_does_not_demote_active(db_session):
+    """低置信度合并后 maybe_activate 不得把 active 降为 pending"""
+    from server.core.distill import activate
+
+    r = KnowledgeRule(
+        id="r_active",
+        category="通用",
+        rule_text="已上线规则",
+        confidence=0.4,  # 低于阈值
+        status="active",
+        is_active=True,
+    )
+    db_session.add(r)
+    await db_session.commit()
+
+    status = await activate.maybe_activate(db_session, "rule", "r_active")
+    await db_session.commit()
+    assert status == "active"
+    rule = await db_session.get(KnowledgeRule, "r_active")
+    assert rule.status == "active"
+    assert rule.is_active is True
+
+
+@pytest.mark.asyncio
+async def test_rolled_back_not_auto_reactivated(db_session):
+    """rolled_back 即使高置信度也不被 maybe_activate 复活；仅 approve 可恢复"""
+    from server.core.distill import activate
+
+    r = KnowledgeRule(
+        id="r_rb",
+        category="通用",
+        rule_text="已回滚规则",
+        confidence=0.95,
+        status="rolled_back",
+        is_active=False,
+    )
+    db_session.add(r)
+    await db_session.commit()
+
+    status = await activate.maybe_activate(db_session, "rule", "r_rb")
+    await db_session.commit()
+    assert status == "rolled_back"
+    rule = await db_session.get(KnowledgeRule, "r_rb")
+    assert rule.status == "rolled_back"
+    assert rule.is_active is False
+
+    await activate.approve(db_session, "rule", "r_rb")
+    await db_session.commit()
+    rule = await db_session.get(KnowledgeRule, "r_rb")
+    assert rule.status == "active"
+    assert rule.is_active is True
