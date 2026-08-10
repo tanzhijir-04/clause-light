@@ -12,7 +12,8 @@ from server.config import settings
 logger = logging.getLogger(__name__)
 
 # PyMuPDF 提取文字的最低阈值：低于此长度认为是纯图片 PDF，需要 OCR
-_PYMUPDF_MIN_TEXT_LEN = 100
+PYMUPDF_MIN_TEXT_LEN = 100
+_PYMUPDF_MIN_TEXT_LEN = PYMUPDF_MIN_TEXT_LEN  # 兼容旧引用
 
 
 @dataclass
