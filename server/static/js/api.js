@@ -167,6 +167,18 @@ const API = (() => {
     async feedback(data) {
       return _fetch('/api/memory/feedback', { method: 'POST', body: JSON.stringify(data) });
     },
+    async pending() {
+      return _fetch('/api/memory/pending');
+    },
+    async approvePending(assetType, assetId) {
+      return _fetch(`/api/memory/pending/${assetType}/${assetId}/approve`, { method: 'POST' });
+    },
+    async rejectPending(assetType, assetId) {
+      return _fetch(`/api/memory/pending/${assetType}/${assetId}/reject`, { method: 'POST' });
+    },
+    async rollbackPending(assetType, assetId) {
+      return _fetch(`/api/memory/pending/${assetType}/${assetId}/rollback`, { method: 'POST' });
+    },
   };
 
   /** 同步相关 API */
