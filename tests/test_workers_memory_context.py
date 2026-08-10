@@ -27,6 +27,12 @@ async def test_analyze_dimension_includes_memory_context():
 
             return R()
 
+        async def chat_structured(self, messages, schema, task="analysis", **kwargs):
+            from server.core.llm import StructuredLLMResponse
+
+            await self.chat(messages, task=task)
+            return StructuredLLMResponse(content="[]", parsed=None, via="fallback")
+
     clauses = [
         ClauseItem(
             id="1",
@@ -65,6 +71,12 @@ async def test_analyze_dimension_omits_empty_memory_context():
                 content = "[]"
 
             return R()
+
+        async def chat_structured(self, messages, schema, task="analysis", **kwargs):
+            from server.core.llm import StructuredLLMResponse
+
+            await self.chat(messages, task=task)
+            return StructuredLLMResponse(content="[]", parsed=None, via="fallback")
 
     clauses = [
         ClauseItem(

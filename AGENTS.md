@@ -18,7 +18,7 @@ ClauseLight（合同红绿灯）是一个开源合同风险审查工具。
 - **文档解析**：Firecrawl AnyDoc（`firecrawl-anydoc`）— Word/Excel/PPT/ODF/RTF/EPUB/CSV/文字 PDF → Markdown
 - **Embedding**：sentence-transformers
 - **LLM 调用**：openai SDK（兼容 OpenAI/DeepSeek/通义千问等 OpenAI 格式 API）
-- **结构化输出（规划中）**：Outlines（.txt）经 `LLMGateway` 统一接入
+- **结构化输出**：Outlines（.txt）经 `LLMGateway.chat_structured` 统一接入；失败回退 `parse_json` + Pydantic 校验
 - **图检索（规划中）**：HKUDS/LightRAG 作为 Wiki/法规双层检索后端，默认可选、本地可关
 - **本地 LLM**：Ollama（通过 OpenAI 兼容接口调用）
 - **文件处理**：AnyDoc + Pillow；扫描 PDF 转图仍可用 PyMuPDF

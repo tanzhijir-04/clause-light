@@ -40,6 +40,17 @@ class FakeLLM:
 
         return R()
 
+    async def chat_structured(self, messages, schema, task="analysis", **kwargs):
+        from server.core.llm import LLMGateway, StructuredLLMResponse
+
+        r = await self.chat(messages, task=task)
+        gw = LLMGateway()
+        gw._clients = {}
+        parsed = gw._validate_schema(r.content, schema)
+        return StructuredLLMResponse(
+            content=r.content, parsed=parsed, via="fallback"
+        )
+
 
 class BrokenLLM:
     """返回非法 JSON，用于软失败测试"""
@@ -49,6 +60,12 @@ class BrokenLLM:
             content = "这不是合法 JSON {{{"
 
         return R()
+
+    async def chat_structured(self, messages, schema, task="analysis", **kwargs):
+        from server.core.llm import StructuredLLMResponse
+
+        r = await self.chat(messages, task=task)
+        return StructuredLLMResponse(content=r.content, parsed=None, via="fallback")
 
 
 @pytest.mark.asyncio

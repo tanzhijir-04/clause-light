@@ -60,6 +60,16 @@ async def test_analyze_sets_session_id_and_injects_atom(db_session):
 
             return R()
 
+        async def chat_structured(self, messages, schema, task="analysis", **kwargs):
+            from server.core.llm import LLMGateway, StructuredLLMResponse
+
+            r = await self.chat(messages, task=task)
+            gw = LLMGateway()
+            gw._clients = {}
+            parsed = gw._validate_schema(r.content, schema)
+            return StructuredLLMResponse(
+                content=r.content, parsed=parsed, via="fallback"
+            )
     @asynccontextmanager
     async def _factory():
         yield db_session
@@ -131,6 +141,12 @@ async def test_analyze_without_memory_still_ok(db_session):
                 content = "[]"
 
             return R()
+
+        async def chat_structured(self, messages, schema, task="analysis", **kwargs):
+            from server.core.llm import StructuredLLMResponse
+
+            r = await self.chat(messages, task=task)
+            return StructuredLLMResponse(content=r.content, parsed=None, via="fallback")
 
     @asynccontextmanager
     async def _factory():
