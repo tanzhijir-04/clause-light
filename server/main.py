@@ -190,6 +190,7 @@ async def log_requests(request: Request, call_next):
 
 from server.api.contracts import router as contracts_router
 from server.api.knowledge import router as knowledge_router
+from server.api.memory import router as memory_router
 from server.api.models import router as models_router
 from server.api.sync import router as sync_router
 from server.api.ws import router as ws_router
@@ -197,6 +198,7 @@ from server.api.connection import router as connection_router
 
 app.include_router(contracts_router)
 app.include_router(knowledge_router)
+app.include_router(memory_router)
 app.include_router(models_router)
 app.include_router(sync_router)
 app.include_router(ws_router)
