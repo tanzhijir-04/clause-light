@@ -1,21 +1,26 @@
 # ClauseLight Agent 架构设计 & CC 开发提示词
 
-## 一、架构总览：Prompt Chaining + Parallelization Workflow
+## 一、架构总览：Pipeline + 有限工具
 
-**选型依据**：合同审查是确定性任务，步骤可预分解，不需要 Full Agent。采用 Anthropic 推荐的 Prompt Chaining + Parallelization 模式，用 Workflow 编排而非 Agent 自主循环。
+**选型依据**：合同审查是确定性任务，步骤可预分解。采用 Anthropic 推荐的 Prompt Chaining + Parallelization 模式，用 **Pipeline 编排为主、按需工具为辅**（非全自主 ReAct 循环）。记忆与 Wiki/Skill 在冲突或低置信时再召回，避免常驻塞满上下文。
 
 ```
 用户上传合同 PDF/图片
         │
         ▼
   ┌─────────────────┐
-  │   OCR 识别层     │  PaddleOCR → 原始文本 + 置信度
+  │  文档解析层      │  AnyDoc / PaddleOCR → 文本 + 置信度
   └────────┬────────┘
            │
            ▼
   ┌─────────────────┐
   │  Stage 1:       │  结构解析 Worker（1 次 LLM 调用）
   │  条款拆解 + 分类 │  输出：条款数组 + 合同类型 + 模型路由决策
+  └────────┬────────┘
+           │
+           ▼
+  ┌─────────────────┐
+  │ Memory Loadout   │  L0 会话 + L3/L2 开场 + L1/规则/Skill 装配
   └────────┬────────┘
            │
      ┌─────┼─────┬──────────┐
@@ -26,7 +31,7 @@
   └──┬──┘└──┬──┘└──┬──┘└────┬────┘
      │     │     │        │
      └─────┴─────┴────────┘
-           │
+           │  （冲突时 ≤2 次 memory/wiki/skill 工具增强）
            ▼
   ┌─────────────────┐
   │  Stage 3:       │  一致性检查 + 聚合评分
@@ -35,21 +40,37 @@
            │
            ▼
   ┌─────────────────┐
-  │  输出渲染层      │  红黄绿标注 + 修改建议 + 用户友好报告
+  │ Distill（软失败）│  分析结束后提炼候选记忆资产
+  └────────┬────────┘
+           │
+           ▼
+  ┌─────────────────┐
+  │  输出渲染层      │  红黄绿标注 + 修改建议 + session_id
   └─────────────────┘
 ```
 
-**总 LLM 调用次数**：1（解析）+ 4~5（并行分析）+ 1（聚合）= 6~7 次，其中并行调用的延迟等于单次最慢调用。
+**总 LLM 调用次数**：基线 1（解析）+ 4~5（并行分析）+ 1（聚合）= 6~7 次；冲突工具路径额外 ≤ 2 次/请求；Distill 另计且失败不影响主结果。
+
+### Memory Loadout + Tools
+
+| 时机 | 行为 |
+|------|------|
+| Stage1 后 | `MemoryKernel.start_session`；`build_loadout`（L3+L2）+ `build_stage_context`（L1+规则+Skill）注入 Worker |
+| 维度冲突 | `run_conflict_tools`（memory/wiki/skill），每请求最多 2 个冲突条款簇 |
+| 分析结束 | `distill_from_analysis`（await + 吞异常）；写 L0 `distill_done` |
+| 对外字段 | `AnalysisResult.session_id`；WS/SSE 透出 `sessionId`（旧客户端可忽略） |
+
+实现入口：`server/core/agent_tools.py`、`server/core/agent.py`。无记忆或失败时降级为空上下文，行为与改造前一致。
 
 ---
 
 ## 二、各阶段详细设计
 
-### OCR 层
+### OCR / 文档解析层
 
-- 使用现有 `server/core/ocr.py`（PaddleOCR 封装），不改动
-- **新增**：OCR 完成后检查 `confidence_avg`，低于 0.7 时在结果中标记 `ocr_quality: "low"`，前端提示用户"识别质量较低，建议手动补充"
-- OCR 结果作为只读输入传给 Stage 1，不参与后续 LLM 调用
+- 解析统一走 `document_ingress`（AnyDoc / PaddleOCR / 纯文本）；字段名仍为 `ocr_text` 以兼容标注视图
+- 置信度低于 0.7 时打日志提示识别质量较低
+- 解析结果作为只读输入传给 Stage 1，不参与后续 LLM 调用
 
 ### Stage 1：结构解析 Worker
 
@@ -297,4 +318,4 @@ server/core/
 1. **Evaluator 循环迭代**：如果一致性检查发现严重冲突，可以让相关 Worker 重新分析（需要改 agent.py 为 loop 结构）
 2. **用户反馈学习**：用户对评级结果的修正可以反馈到知识库（`auto_learned` 来源）
 3. **多合同对比**：同一份合同不同版本的风险对比
-4. **Agent 模式升级**：当需要处理开放式问题（如"这份合同适不适合我的业务场景"）时，再升级为 Full Agent Loop
+4. **对话扩展**：开放式追问（如「这份合同适不适合我的业务场景」）走后续 Contract Chat（Phase D），仍挂在 Pipeline + 工具之上，不改为全自主 Agent Loop
