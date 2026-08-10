@@ -71,10 +71,11 @@ async def maybe_activate(
     asset_id: str,
 ) -> str:
     """
-    按置信度分级生效。
+    按置信度分级生效（仅 pending → active）。
 
-    confidence >= MEMORY_AUTO_ACTIVATE_THRESHOLD → active（可回滚）
-    否则保持 pending。
+    - 仅当 status=pending 且 confidence >= MEMORY_AUTO_ACTIVATE_THRESHOLD 时晋升为 active
+    - 永不降级 active → pending
+    - 永不自动复活 rolled_back / disabled（仅 approve() 可恢复）
     返回最终 status。
     """
     asset = await _get_asset(db, asset_type, asset_id)
@@ -84,6 +85,10 @@ async def maybe_activate(
     threshold = float(settings.MEMORY_AUTO_ACTIVATE_THRESHOLD)
     confidence = float(getattr(asset, "confidence", 0.0) or 0.0)
     current = getattr(asset, "status", None) or "pending"
+
+    # 非 pending：保持原状（含 active / rolled_back / disabled）
+    if current != "pending":
+        return current
 
     if confidence >= threshold:
         _apply_status(asset, asset_type, "active")
@@ -98,10 +103,6 @@ async def maybe_activate(
         logger.info("自动激活资产: %s/%s confidence=%.2f", asset_type, asset_id, confidence)
         return "active"
 
-    # 低于阈值：确保为 pending
-    if current != "pending":
-        _apply_status(asset, asset_type, "pending")
-        await db.flush()
     return "pending"
 
 

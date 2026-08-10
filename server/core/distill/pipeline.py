@@ -68,7 +68,12 @@ async def _merge_or_create_atom(
     contract_type: str,
     item: dict[str, Any],
 ) -> str | None:
-    """去重后写入 L1 atom，返回 id"""
+    """去重后写入 L1 atom，返回 id。
+
+    - pending：合并置信度并返回，供 maybe_activate 晋升
+    - active：仅抬升 confidence / confirm_count，不改 status
+    - rolled_back / disabled：不合并，另建 pending
+    """
     content = (item.get("content") or "").strip()
     if not content:
         return None
@@ -78,11 +83,15 @@ async def _merge_or_create_atom(
 
     existing = (await db.execute(select(MemoryAtom))).scalars().all()
     for atom in existing:
-        if _is_similar(atom.content, content):
-            # 合并：取较高置信度
-            atom.confidence = max(float(atom.confidence or 0.0), confidence)
-            await db.flush()
-            return atom.id
+        if not _is_similar(atom.content, content):
+            continue
+        status = atom.status or "pending"
+        if status in ("rolled_back", "disabled"):
+            continue  # 不复活，继续找可合并目标或新建 pending
+        atom.confidence = max(float(atom.confidence or 0.0), confidence)
+        atom.confirm_count = int(atom.confirm_count or 0) + 1
+        await db.flush()
+        return atom.id
 
     return await memory_store.upsert_atom(
         db,
@@ -102,7 +111,12 @@ async def _merge_or_create_rule(
     *,
     item: dict[str, Any],
 ) -> str | None:
-    """去重后写入 knowledge_rules（pending），返回 id"""
+    """去重后写入 knowledge_rules，返回 id。
+
+    - pending：合并置信度并返回，供 maybe_activate 晋升
+    - active：仅抬升 confidence / confirm_count，不改 status
+    - rolled_back / disabled：不合并，另建 pending
+    """
     rule_text = (item.get("rule_text") or "").strip()
     if not rule_text:
         return None
@@ -113,10 +127,15 @@ async def _merge_or_create_rule(
 
     existing = (await db.execute(select(KnowledgeRule))).scalars().all()
     for rule in existing:
-        if _is_similar(rule.rule_text, rule_text):
-            rule.confidence = max(float(rule.confidence or 0.0), confidence)
-            await db.flush()
-            return rule.id
+        if not _is_similar(rule.rule_text, rule_text):
+            continue
+        status = rule.status or "pending"
+        if status in ("rolled_back", "disabled"):
+            continue  # 不复活，继续找可合并目标或新建 pending
+        rule.confidence = max(float(rule.confidence or 0.0), confidence)
+        rule.confirm_count = int(rule.confirm_count or 0) + 1
+        await db.flush()
+        return rule.id
 
     rule = KnowledgeRule(
         id=uuid.uuid4().hex,
@@ -157,7 +176,13 @@ async def _maybe_create_skill(db: AsyncSession, item: dict[str, Any]) -> str | N
 
 
 async def _upsert_wiki(db: AsyncSession, item: dict[str, Any]) -> str | None:
-    """有 title+body 则按 slug upsert WikiPage"""
+    """有 title+body 则写入 WikiPage。
+
+    - 无同 slug：新建 pending
+    - 已有 pending：更新 body/confidence
+    - 已有 active：不动正文，新建 slug 带 ``-pending-{id}`` 的 pending 页
+    - rolled_back / disabled：同样新建 pending 副本，不复活旧页
+    """
     title = (item.get("title") or "").strip()
     body = (item.get("body") or "").strip()
     if not title or not body:
@@ -167,6 +192,7 @@ async def _upsert_wiki(db: AsyncSession, item: dict[str, Any]) -> str | None:
 
     result = await db.execute(select(WikiPage).where(WikiPage.slug == slug))
     page = result.scalar_one_or_none()
+
     if page is None:
         page = WikiPage(
             id=uuid.uuid4().hex,
@@ -178,14 +204,31 @@ async def _upsert_wiki(db: AsyncSession, item: dict[str, Any]) -> str | None:
             confidence=confidence,
         )
         db.add(page)
-    else:
+        await db.flush()
+        return page.id
+
+    if page.status == "pending":
         page.title = title
         page.body = body
         page.confidence = max(float(page.confidence or 0.0), confidence)
-        if page.status not in ("active",):
-            page.status = "pending"
+        await db.flush()
+        return page.id
+
+    # active / rolled_back / disabled：保留原页，插入新的 pending 副本
+    new_id = uuid.uuid4().hex
+    pending_slug = f"{slug}-pending-{new_id[:8]}"
+    clone = WikiPage(
+        id=new_id,
+        slug=pending_slug,
+        title=title,
+        body=body,
+        status="pending",
+        source="distill",
+        confidence=confidence,
+    )
+    db.add(clone)
     await db.flush()
-    return page.id
+    return clone.id
 
 
 async def distill_from_analysis(
