@@ -227,6 +227,76 @@ class MemoryPersona(Base):
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
 
+# ── 自进化资产：Skill / Wiki / 审计 ──
+
+
+class Skill(Base):
+    """结构化审查 Skill 资产"""
+
+    __tablename__ = "skills"
+
+    id = Column(String, primary_key=True, default=lambda: uuid.uuid4().hex)
+    name = Column(String, nullable=False)
+    version = Column(Integer, default=1)
+    status = Column(String, default="pending")  # pending|active|disabled|rolled_back
+    triggers = Column(Text, nullable=True)  # JSON: contract_types / keywords
+    steps = Column(Text, nullable=True)  # JSON list
+    validation = Column(Text, nullable=True)  # JSON list
+    resources = Column(Text, nullable=True)  # JSON list
+    confidence = Column(Float, default=0.5)
+    embedding = Column(Text, nullable=True)
+    owner_user_id = Column(String, default="local")
+    visibility = Column(String, default="private")
+    acl_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+
+class WikiPage(Base):
+    """本地 Wiki 页面"""
+
+    __tablename__ = "wiki_pages"
+
+    id = Column(String, primary_key=True, default=lambda: uuid.uuid4().hex)
+    slug = Column(String, nullable=False, unique=True)
+    title = Column(String, nullable=False)
+    body = Column(Text, nullable=False, default="")
+    status = Column(String, default="pending")  # pending|active|disabled|rolled_back
+    source = Column(String, default="manual")  # manual|import|distill
+    confidence = Column(Float, default=0.5)
+    embedding = Column(Text, nullable=True)
+    owner_user_id = Column(String, default="local")
+    visibility = Column(String, default="private")
+    acl_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+
+class WikiLink(Base):
+    """Wiki 页面间链接"""
+
+    __tablename__ = "wiki_links"
+
+    id = Column(String, primary_key=True, default=lambda: uuid.uuid4().hex)
+    from_page_id = Column(String, nullable=False, index=True)
+    to_page_id = Column(String, nullable=False, index=True)
+    rel = Column(String, default="related")  # cites|related|supersedes
+    created_at = Column(DateTime, default=func.now())
+
+
+class AssetAuditLog(Base):
+    """资产状态变更审计日志"""
+
+    __tablename__ = "asset_audit_log"
+
+    id = Column(String, primary_key=True, default=lambda: uuid.uuid4().hex)
+    asset_type = Column(String, nullable=False)  # rule|atom|skill|wiki
+    asset_id = Column(String, nullable=False, index=True)
+    action = Column(String, nullable=False)  # create|activate|approve|reject|rollback
+    detail = Column(Text, nullable=True)  # JSON
+    created_at = Column(DateTime, default=func.now())
+
+
 # ── 数据库引擎 ──
 
 engine = create_async_engine(settings.DATABASE_URL, echo=settings.DEBUG)
