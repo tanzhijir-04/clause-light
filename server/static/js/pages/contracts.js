@@ -53,7 +53,7 @@ const ContractsPage = {
         <button class="btn btn-primary" onclick="document.getElementById('contract-file-input').click()">
           ${Icons.upload(14)} 上传合同
         </button>
-        <input type="file" id="contract-file-input" accept=".pdf,.jpg,.jpeg,.png" style="display:none" onchange="ContractsPage.handleUpload(this)">
+        <input type="file" id="contract-file-input" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.odt,.ods,.odp,.rtf,.epub,.csv,.png,.jpg,.jpeg,.bmp,.tiff,.tif,.webp" style="display:none" onchange="ContractsPage.handleUpload(this)">
       </div>
       <div class="content-body animate-in">
         <div class="filter-bar">

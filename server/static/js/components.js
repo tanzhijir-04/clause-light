@@ -100,7 +100,7 @@ const Components = (() => {
       <div class="upload-zone-title">快速上传合同</div>
       <div class="upload-zone-hint">拖放文件到此处，或点击选择文件</div>
       <button class="btn btn-primary" style="margin-top:var(--sp-2)" onclick="document.getElementById('file-input').click()">选择文件</button>
-      <input type="file" id="file-input" accept=".pdf,.jpg,.jpeg,.png" style="display:none" onchange="Components.handleFileUpload(this)">
+      <input type="file" id="file-input" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.odt,.ods,.odp,.rtf,.epub,.csv,.png,.jpg,.jpeg,.bmp,.tiff,.tif,.webp" style="display:none" onchange="Components.handleFileUpload(this)">
     </div>`;
   }
 

@@ -50,9 +50,33 @@ export const analyzeContract = async (
   const base = getBaseUrl();
   const formData = new FormData();
 
-  // 获取文件名和类型
+  // 获取文件名和 MIME（按扩展名推断，兼容办公文档）
   const filename = fileUri.split('/').pop() || 'contract.pdf';
-  const type = filename.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg';
+  const lower = filename.toLowerCase();
+  const mimeByExt: Record<string, string> = {
+    pdf: 'application/pdf',
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    bmp: 'image/bmp',
+    tiff: 'image/tiff',
+    tif: 'image/tiff',
+    webp: 'image/webp',
+    doc: 'application/msword',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xls: 'application/vnd.ms-excel',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ppt: 'application/vnd.ms-powerpoint',
+    pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    rtf: 'application/rtf',
+    csv: 'text/csv',
+    epub: 'application/epub+zip',
+    odt: 'application/vnd.oasis.opendocument.text',
+    ods: 'application/vnd.oasis.opendocument.spreadsheet',
+    odp: 'application/vnd.oasis.opendocument.presentation',
+  };
+  const ext = lower.includes('.') ? lower.split('.').pop() || '' : '';
+  const type = mimeByExt[ext] || 'application/octet-stream';
 
   formData.append('file', {
     uri: fileUri,
