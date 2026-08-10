@@ -190,6 +190,22 @@ class TestKnowledgeSearch:
         assert any("通用规则" in r for r in results)
         assert not any("劳动规则" in r for r in results)
 
+    async def test_search_respects_status_pending(self, db_session):
+        """pending 状态规则即使 is_active=True 也不应被检索"""
+        db_session.add(KnowledgeRule(
+            id="r_pending",
+            category="租赁",
+            rule_text="pending规则违约金",
+            trigger_keywords='["违约金"]',
+            confidence=0.9,
+            is_active=True,
+            status="pending",
+        ))
+        await db_session.commit()
+        engine = KnowledgeEngine(db_session)
+        results = await engine.search("违约金", "租赁合同")
+        assert all("pending规则" not in r for r in results)
+
 
 class TestKnowledgeAddRule:
     """知识库新增规则测试"""

@@ -22,6 +22,28 @@ from server.models.database import (
 logger = logging.getLogger(__name__)
 
 
+def effective_rule_status(rule: KnowledgeRule) -> str:
+    """解析规则生效状态：优先 status，兼容仅设 is_active 的旧数据"""
+    status = rule.status
+    if not status:
+        return "active" if rule.is_active else "disabled"
+    # pending / disabled / rolled_back 以 status 为准（即使 is_active 仍为 True）
+    if status != "active":
+        return status
+    # status=active 但 is_active=False：视为禁用（Column 默认 status=active 的兼容）
+    if not rule.is_active:
+        return "disabled"
+    return "active"
+
+
+def sync_rule_is_active(rule: KnowledgeRule) -> None:
+    """根据 status 同步兼容字段 is_active"""
+    status = effective_rule_status(rule)
+    rule.is_active = status == "active"
+    if not rule.status:
+        rule.status = status
+
+
 class KnowledgeEngine:
     """知识库管理与检索"""
 
@@ -37,7 +59,7 @@ class KnowledgeEngine:
         """
         混合检索相关规则（关键词 + 语义向量）。
 
-        1. 查询 is_active=1 的规则
+        1. 仅返回 status==active 的规则（兼容缺失 status 时回退 is_active）
         2. 按 category 过滤（通用 + 对应合同类型）
         3. 关键词匹配评分
         4. 如果 embedding 可用，叠加语义相似度评分
@@ -47,14 +69,15 @@ class KnowledgeEngine:
 
         category = TYPE_CATEGORY_MAP.get(contract_type, "其他")
 
-        stmt = select(KnowledgeRule).where(KnowledgeRule.is_active == True)  # noqa: E712
+        stmt = select(KnowledgeRule)
         result = await self.db.execute(stmt)
         rules = result.scalars().all()
 
-        # 过滤出匹配类别的规则
+        # 过滤出 active 且匹配类别的规则
         filtered = [
             r for r in rules
-            if r.category == "通用" or r.category == category
+            if effective_rule_status(r) == "active"
+            and (r.category == "通用" or r.category == category)
         ]
 
         if not filtered:
@@ -140,6 +163,7 @@ class KnowledgeEngine:
 
     async def add_rule(self, rule_data: dict) -> dict:
         """新增规则"""
+        status = rule_data.get("status", "active")
         rule = KnowledgeRule(
             id=uuid.uuid4().hex,
             category=rule_data.get("category", "通用"),
@@ -147,7 +171,10 @@ class KnowledgeEngine:
             trigger_keywords=json.dumps(rule_data.get("trigger_keywords", []), ensure_ascii=False),
             confidence=rule_data.get("confidence", 0.5),
             source=rule_data.get("source", "manual"),
+            status=status,
+            is_active=status == "active",
         )
+        sync_rule_is_active(rule)
         self.db.add(rule)
         await self.db.flush()
         logger.info("新增规则: id=%s category=%s", rule.id, rule.category)
@@ -167,8 +194,12 @@ class KnowledgeEngine:
             rule.rule_text = data["rule_text"]
         if "confidence" in data:
             rule.confidence = data["confidence"]
-        if "is_active" in data:
+        if "status" in data:
+            rule.status = data["status"]
+            sync_rule_is_active(rule)
+        elif "is_active" in data:
             rule.is_active = data["is_active"]
+            rule.status = "active" if data["is_active"] else "disabled"
         if "trigger_keywords" in data:
             rule.trigger_keywords = json.dumps(data["trigger_keywords"], ensure_ascii=False)
 
@@ -325,7 +356,8 @@ class KnowledgeEngine:
         result = await self.db.execute(stmt)
         rule = result.scalar_one_or_none()
         if rule:
-            rule.is_active = False
+            rule.status = "disabled"
+            sync_rule_is_active(rule)
             rule.updated_at = datetime.now(timezone.utc)
             logger.info("审核拒绝规则: id=%s", rule_id)
 

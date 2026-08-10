@@ -106,6 +106,8 @@ class KnowledgeRule(Base):
     confirm_count = Column(Integer, default=0)
     reject_count = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)
+    # pending|active|disabled|rolled_back；检索以 status 为准，is_active 为兼容字段
+    status = Column(String, default="active")
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
