@@ -9,6 +9,9 @@ const ContractDetailPage = {
   _activeClauseId: null,
   _riskFilter: null,
   _riskClauses: [],           // 仅 red + yellow 条款（用于导航）
+  _chatSessionId: null,
+  _chatMessages: [],          // {role: 'user'|'assistant', text: string}[]
+  _chatSending: false,
 
   async render(params = {}) {
     const id = params.id;
@@ -33,11 +36,17 @@ const ContractDetailPage = {
         </div>`;
     }
 
-    // 保存到模块状态
+    // 保存到模块状态（切换合同时重置追问会话）
+    const prevId = this._contract && this._contract.id;
     this._contract = contract;
     this._activeClauseId = null;
     this._riskFilter = null;
     this._riskClauses = (contract.clauses || []).filter(c => c.riskLevel === 'red' || c.riskLevel === 'yellow');
+    if (prevId !== contract.id) {
+      this._chatSessionId = null;
+      this._chatMessages = [];
+      this._chatSending = false;
+    }
 
     // 如果没有 fullText，强制使用列表视图
     if (!contract.fullText) {
@@ -87,12 +96,82 @@ const ContractDetailPage = {
           <div class="view-tab ${this._currentView === 'annotated' ? 'active' : ''}" onclick="ContractDetailPage._switchView('annotated')" ${!contract.fullText ? 'style="opacity:0.4;pointer-events:none"' : ''}>原文标注</div>
         </div>
       </div>
-      <div class="content-body animate-in" style="display:flex;overflow:hidden">
-        <div id="detail-view-container" style="flex:1;overflow-y:auto;display:flex;flex-direction:column">
-          ${this._renderViewContent()}
+      <div class="content-body animate-in" style="display:flex;overflow:hidden;flex-direction:column">
+        <div style="flex:1;display:flex;overflow:hidden;min-height:0">
+          <div id="detail-view-container" style="flex:1;overflow-y:auto;display:flex;flex-direction:column">
+            ${this._renderViewContent()}
+          </div>
+          <div id="annotation-panel" class="annotation-panel collapsed"></div>
         </div>
-        <div id="annotation-panel" class="annotation-panel collapsed"></div>
+        ${this._renderChatPanel()}
       </div>`;
+  },
+
+  // ── 追问对话 ──
+
+  _renderChatPanel() {
+    const messagesHtml = this._chatMessages.length === 0
+      ? `<div class="contract-chat-empty">针对本合同追问，例如「违约金合理吗？」</div>`
+      : this._chatMessages.map(m => `
+          <div class="contract-chat-msg ${m.role}">
+            <div class="contract-chat-bubble">${Components.escapeHtml(m.text)}</div>
+          </div>`).join('');
+
+    return `
+      <div class="contract-chat" id="contract-chat">
+        <div class="contract-chat-header">追问对话</div>
+        <div class="contract-chat-messages" id="contract-chat-messages">${messagesHtml}</div>
+        <div class="contract-chat-input-row">
+          <input id="contract-chat-input" class="input" type="text" placeholder="输入问题后回车发送"
+                 ${this._chatSending ? 'disabled' : ''}
+                 onkeydown="if(event.key==='Enter'){event.preventDefault();ContractDetailPage._sendChat();}" />
+          <button class="btn btn-primary btn-sm" id="contract-chat-send"
+                  onclick="ContractDetailPage._sendChat()"
+                  ${this._chatSending ? 'disabled' : ''}>发送</button>
+        </div>
+      </div>`;
+  },
+
+  _refreshChatPanel() {
+    const panel = document.getElementById('contract-chat');
+    if (!panel) return;
+    panel.outerHTML = this._renderChatPanel();
+    const messages = document.getElementById('contract-chat-messages');
+    if (messages) messages.scrollTop = messages.scrollHeight;
+    const input = document.getElementById('contract-chat-input');
+    if (input && !this._chatSending) input.focus();
+  },
+
+  async _sendChat() {
+    if (this._chatSending || !this._contract) return;
+    const input = document.getElementById('contract-chat-input');
+    const message = (input && input.value ? input.value : '').trim();
+    if (!message) return;
+
+    this._chatMessages.push({ role: 'user', text: message });
+    this._chatSending = true;
+    this._refreshChatPanel();
+
+    try {
+      const res = await API.contracts.chat(this._contract.id, {
+        message,
+        session_id: this._chatSessionId,
+      });
+      this._chatSessionId = res.session_id || this._chatSessionId;
+      this._chatMessages.push({
+        role: 'assistant',
+        text: res.reply || '（无回复）',
+      });
+    } catch (e) {
+      this._chatMessages.push({
+        role: 'assistant',
+        text: '追问失败：' + (e.message || '未知错误'),
+      });
+      Components.toast('追问失败：' + (e.message || '未知错误'), 'error');
+    } finally {
+      this._chatSending = false;
+      this._refreshChatPanel();
+    }
   },
 
   // ── 视图内容渲染 ──

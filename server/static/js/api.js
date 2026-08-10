@@ -121,6 +121,17 @@ const API = (() => {
     async update(id, data) {
       return _fetch(`/api/contracts/${id}`, { method: 'PUT', body: JSON.stringify(data) });
     },
+    /**
+     * 合同多轮追问
+     * @param {string} id
+     * @param {{message: string, session_id?: string|null}} body
+     */
+    async chat(id, body) {
+      return _fetch(`/api/contracts/${id}/chat`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+    },
   };
 
   /** 知识库相关 API */
