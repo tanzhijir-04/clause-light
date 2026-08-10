@@ -11,6 +11,7 @@ venv/
 
 # 数据
 data/
+data/lightrag/
 *.db
 
 # 环境变量
