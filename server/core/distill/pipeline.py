@@ -15,6 +15,7 @@ from server.core.distill import activate
 from server.core.knowledge import sync_rule_is_active
 from server.core.memory import store as memory_store
 from server.core.prompts.distill import build_distill_messages
+from server.core.schemas.llm_outputs import DistillResultSchema
 from server.models.database import KnowledgeRule, Skill, WikiPage
 
 logger = logging.getLogger(__name__)
@@ -252,11 +253,16 @@ async def distill_from_analysis(
             clause_summaries=clause_summaries,
             feedback_events=feedback_events,
         )
-        response = await llm.chat(messages, task="analysis")
-        content = getattr(response, "content", "") or ""
-        data = _parse_json_content(content)
+        response = await llm.chat_structured(
+            messages, schema=DistillResultSchema, task="analysis"
+        )
+        if isinstance(response.parsed, DistillResultSchema):
+            data = response.parsed.model_dump()
+        else:
+            content = getattr(response, "content", "") or ""
+            data = _parse_json_content(content)
         if data is None:
-            logger.warning("Distill JSON 解析失败，跳过提炼: %s", content[:200])
+            logger.warning("Distill JSON 解析失败，跳过提炼")
             return counts
 
         for item in data.get("atoms") or []:

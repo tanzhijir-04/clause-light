@@ -7,6 +7,7 @@ import logging
 from dataclasses import dataclass
 
 from server.core.llm import LLMGateway
+from server.core.schemas.llm_outputs import ClauseRiskListSchema, ClauseRiskSchema
 from server.core.workers.parser import ClauseItem
 
 logger = logging.getLogger(__name__)
@@ -96,19 +97,12 @@ def build_worker_system_prompt(dimension: str) -> str:
         f"- yellow: 存在不确定性、行业惯例有争议、或轻微不利于乙方\n"
         f"- green: 条款标准且对乙方无明显不利\n\n"
         f"## 输出格式\n"
-        f"只返回 JSON 数组，不要包含任何其他文字、解释或 markdown 格式。\n"
-        f"对每个条款输出：\n"
-        f'{{\n'
-        f'  "clause_id": "条款id",\n'
-        f'  "risk_level": "red/yellow/green",\n'
-        f'  "risk_type": "具体风险类型",\n'
-        f'  "issue": "问题描述（一句话）",\n'
-        f'  "unfavorable_to": "不利方（甲方/乙方/双方）",\n'
-        f'  "severity": 1-10,\n'
-        f'  "suggestion": "具体修改方向或替代表述",\n'
-        f'  "legal_basis": "相关法律依据（如有）"\n'
-        f'}}\n'
-        f'如某条款在本维度无风险，输出 risk_level: "green"，issue: "本维度无明显风险"。\n'
+        f"只返回 JSON（不要 markdown）。优先对象格式：\n"
+        f'{{"risks":[{{"clause_id":"...","risk_level":"red|yellow|green",'
+        f'"risk_type":"...","issue":"...","unfavorable_to":"...",'
+        f'"severity":1,"suggestion":"...","legal_basis":"..."}}]}}\n'
+        f"也可以直接返回上述元素组成的 JSON 数组。"
+        f"如某条款在本维度无风险，risk_level 为 green，issue 为「本维度无明显风险」。\n"
     )
 
 
@@ -162,26 +156,35 @@ async def analyze_dimension(
         {"role": "user", "content": user_content},
     ]
 
-    resp = await llm.chat(messages, task="analysis")
+    resp = await llm.chat_structured(
+        messages, schema=ClauseRiskListSchema, task="analysis"
+    )
 
-    if not resp.content:
+    if resp.parsed is None and not resp.content:
         logger.warning("Worker[%s]: LLM 返回空内容", dimension)
         return [
             ClauseRisk(clause_id=c.id, risk_level="green", issue="分析失败，请人工复核")
             for c in relevant
         ]
 
-    parsed = llm.parse_json(resp.content)
-
-    if not isinstance(parsed, list):
-        logger.warning("Worker[%s]: JSON 解析失败", dimension)
-        return [
-            ClauseRisk(clause_id=c.id, risk_level="green", issue="分析失败，请人工复核")
-            for c in relevant
-        ]
+    risk_items: list = []
+    if isinstance(resp.parsed, ClauseRiskListSchema):
+        risk_items = [r.model_dump() for r in resp.parsed.risks]
+    else:
+        parsed = llm.parse_json(resp.content)
+        if isinstance(parsed, list):
+            risk_items = parsed
+        elif isinstance(parsed, dict) and isinstance(parsed.get("risks"), list):
+            risk_items = parsed["risks"]
+        else:
+            logger.warning("Worker[%s]: JSON 解析失败", dimension)
+            return [
+                ClauseRisk(clause_id=c.id, risk_level="green", issue="分析失败，请人工复核")
+                for c in relevant
+            ]
 
     results: list[ClauseRisk] = []
-    for item in parsed:
+    for item in risk_items:
         if isinstance(item, dict):
             results.append(ClauseRisk(
                 clause_id=item.get("clause_id", ""),
@@ -195,12 +198,13 @@ async def analyze_dimension(
             ))
 
     logger.info(
-        "Worker[%s] 完成: %d 条条款, red=%d yellow=%d green=%d",
+        "Worker[%s] 完成: %d 条条款, red=%d yellow=%d green=%d via=%s",
         dimension,
         len(results),
         sum(1 for r in results if r.risk_level == "red"),
         sum(1 for r in results if r.risk_level == "yellow"),
         sum(1 for r in results if r.risk_level == "green"),
+        getattr(resp, "via", ""),
     )
     return results
 
@@ -270,15 +274,19 @@ async def analyze_dimension_with_context(
         {"role": "user", "content": user_content},
     ]
 
-    resp = await llm.chat(messages, task="analysis")
+    resp = await llm.chat_structured(
+        messages, schema=ClauseRiskSchema, task="analysis"
+    )
 
-    if not resp.content:
-        return None
-
-    parsed = llm.parse_json(resp.content)
-
-    if not isinstance(parsed, dict):
-        return None
+    if isinstance(resp.parsed, ClauseRiskSchema):
+        parsed = resp.parsed.model_dump()
+    else:
+        if not resp.content:
+            return None
+        raw = llm.parse_json(resp.content)
+        if not isinstance(raw, dict):
+            return None
+        parsed = raw
 
     return ClauseRisk(
         clause_id=parsed.get("clause_id", clause.id),

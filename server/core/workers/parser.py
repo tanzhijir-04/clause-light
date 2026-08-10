@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass, field
 
 from server.core.llm import LLMGateway
+from server.core.schemas.llm_outputs import ParseResultSchema
 
 logger = logging.getLogger(__name__)
 
@@ -276,19 +277,28 @@ async def _parse_single_chunk(
         {"role": "user", "content": user_content},
     ]
 
-    resp = await llm.chat(messages, task="analysis")
+    resp = await llm.chat_structured(messages, schema=ParseResultSchema, task="analysis")
 
     result = ParseResult()
 
-    if not resp.content:
+    if not resp.content and resp.parsed is None:
         logger.error("Stage 1 LLM 返回空内容")
         return result
 
-    parsed = llm.parse_json(resp.content)
+    parsed_model = resp.parsed
+    if parsed_model is None:
+        raw = llm.parse_json(resp.content)
+        if not isinstance(raw, dict):
+            logger.warning("Stage 1 JSON 解析失败")
+            return result
+        try:
+            parsed_model = ParseResultSchema.model_validate(raw)
+        except Exception as e:
+            logger.warning("Stage 1 Schema 校验失败: %s", e)
+            return result
 
-    if not isinstance(parsed, dict):
-        logger.warning("Stage 1 JSON 解析失败")
-        return result
+    assert isinstance(parsed_model, ParseResultSchema)
+    parsed = parsed_model.model_dump()
 
     # 解析合同类型
     result.contract_type = parsed.get("contract_type", contract_type_hint or "其他")

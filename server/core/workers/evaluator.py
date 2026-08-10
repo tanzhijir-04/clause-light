@@ -7,6 +7,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 from server.core.llm import LLMGateway
+from server.core.schemas.llm_outputs import EvaluationSchema
 from server.core.workers.workers import ClauseRisk
 
 logger = logging.getLogger(__name__)
@@ -80,9 +81,20 @@ async def evaluate(
         {"role": "user", "content": f"分析结果：\n{risk_list_text}"},
     ]
 
-    resp = await llm.chat(messages, task="scoring")
+    resp = await llm.chat_structured(
+        messages, schema=EvaluationSchema, task="scoring"
+    )
 
-    if resp.content:
+    if isinstance(resp.parsed, EvaluationSchema):
+        parsed = resp.parsed.model_dump()
+        result.overall_score = parsed.get("overall_score", 50)
+        result.risk_distribution = parsed.get(
+            "risk_distribution", {"red": 0, "yellow": 0, "green": 0}
+        )
+        result.recommendation = parsed.get("recommendation", "negotiate_first")
+        result.one_line_summary = parsed.get("one_line_summary", "")
+        result.top_risks = parsed.get("top_risks", [])
+    elif resp.content:
         parsed = llm.parse_json(resp.content)
         if isinstance(parsed, dict):
             result.overall_score = parsed.get("overall_score", 50)
