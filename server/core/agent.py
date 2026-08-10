@@ -411,7 +411,52 @@ class ContractAgent:
             result.green_count,
             len(result.needs_review),
         )
+
+        # ── 结束后 Distill（await + 吞异常，不阻断主结果）──
+        await self._trigger_distill(result)
+
         return result
+
+    async def _trigger_distill(self, result: AnalysisResult) -> None:
+        """分析成功后触发 Distill；失败只记日志。"""
+        if not result.session_id or result.error:
+            return
+        try:
+            from server.core.distill.pipeline import distill_from_analysis
+            from server.core.memory.kernel import MemoryKernel
+
+            clause_summaries = [
+                {
+                    "clause_id": c.get("clause_number"),
+                    "title": c.get("title"),
+                    "risk_level": c.get("risk_level"),
+                    "risk_summary": c.get("risk_summary"),
+                }
+                for c in result.clauses
+            ]
+            async with async_session_factory() as db:
+                await asyncio.wait_for(
+                    distill_from_analysis(
+                        db,
+                        self.llm,
+                        session_id=result.session_id,
+                        contract_type=result.contract_type or "",
+                        clause_summaries=clause_summaries,
+                    ),
+                    timeout=30.0,
+                )
+                try:
+                    kernel = MemoryKernel(db)
+                    await kernel.append_event(
+                        result.session_id,
+                        "distill_done",
+                        {"ok": True},
+                    )
+                except Exception as ev_err:
+                    logger.warning("写入 distill_done 事件失败: %s", ev_err)
+                await db.commit()
+        except Exception as e:
+            logger.warning("Distill 触发失败（不影响分析结果）: %s", e)
 
     async def _retry(self, fn, step_name: str, max_retries: int = 2):
         """带重试的异步调用"""
