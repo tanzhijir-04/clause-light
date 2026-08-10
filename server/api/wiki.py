@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -49,12 +50,12 @@ async def ingest_wiki(
     data: IngestBody,
     db: AsyncSession = Depends(get_db),
 ):
-    """从本地 JSON 路径冷启动导入法规 Wiki"""
+    """从本地 JSON 路径冷启动导入法规 Wiki（仅 shared/laws|rules）"""
     try:
         n = await wiki_ingest.ingest_laws(db, data.path)
         await db.commit()
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
-    except ValueError as e:
+    except (ValueError, json.JSONDecodeError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {"success": True, "count": n}

@@ -12,6 +12,37 @@ from server.core.wiki.store import slugify_law_article, upsert_page
 
 logger = logging.getLogger(__name__)
 
+# server/core/wiki/ingest.py → 仓库根目录
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_ALLOWED_INGEST_ROOTS = (
+    (_REPO_ROOT / "shared" / "laws").resolve(),
+    (_REPO_ROOT / "shared" / "rules").resolve(),
+)
+
+
+def _is_under(path: Path, root: Path) -> bool:
+    """判断 path 是否位于 root 之下（含 root 本身）"""
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def resolve_ingest_path(path: str) -> Path:
+    """
+    解析并校验 ingest 路径：仅允许 shared/laws 或 shared/rules 下的真实路径。
+    通过 realpath 消除 ``..`` 后校验，落在白名单外则拒绝。
+    """
+    resolved = Path(path).resolve()
+    if not any(_is_under(resolved, root) for root in _ALLOWED_INGEST_ROOTS):
+        raise ValueError(
+            f"ingest 路径必须位于 shared/laws 或 shared/rules 下: {path}"
+        )
+    if not resolved.is_file():
+        raise FileNotFoundError(f"法规文件不存在: {path}")
+    return resolved
+
 
 async def ingest_laws(db: AsyncSession, path: str) -> int:
     """
@@ -20,12 +51,13 @@ async def ingest_laws(db: AsyncSession, path: str) -> int:
     每条生成 slug={law}-{article}，status=active，body=content。
     返回写入/更新条数。
     """
-    filepath = Path(path)
-    if not filepath.is_file():
-        raise FileNotFoundError(f"法规文件不存在: {path}")
+    filepath = resolve_ingest_path(path)
 
-    with open(filepath, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"法规 JSON 解析失败: {e}") from e
 
     if not isinstance(data, list):
         raise ValueError("法规 JSON 须为数组")
