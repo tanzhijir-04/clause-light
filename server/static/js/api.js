@@ -155,6 +155,20 @@ const API = (() => {
     },
   };
 
+  /** 分层记忆 API */
+  const memory = {
+    async atoms(params = {}) {
+      const qs = new URLSearchParams(params).toString();
+      return _fetch(`/api/memory/atoms?${qs}`);
+    },
+    async createSession(data) {
+      return _fetch('/api/memory/sessions', { method: 'POST', body: JSON.stringify(data) });
+    },
+    async feedback(data) {
+      return _fetch('/api/memory/feedback', { method: 'POST', body: JSON.stringify(data) });
+    },
+  };
+
   /** 同步相关 API */
   const sync = {
     async config() {
@@ -217,5 +231,5 @@ const API = (() => {
     },
   };
 
-  return { contracts, knowledge, sync, models, settings, connection };
+  return { contracts, knowledge, memory, sync, models, settings, connection };
 })();

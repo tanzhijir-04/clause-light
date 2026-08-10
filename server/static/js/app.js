@@ -6,6 +6,7 @@ const App = (() => {
     dashboard: DashboardPage,
     contracts: ContractsPage,
     knowledge: KnowledgePage,
+    memory: MemoryPage,
     sync: SyncPage,
     settings: SettingsPage,
     models: ModelsPage,
@@ -110,6 +111,7 @@ const App = (() => {
     Router.register('contracts', (params) => renderPage('contracts', params));
     Router.register('contractDetail', (params) => renderPage('contractDetail', params));
     Router.register('knowledge', (params) => renderPage('knowledge', params));
+    Router.register('memory', (params) => renderPage('memory', params));
     Router.register('sync', (params) => renderPage('sync', params));
     Router.register('settings', (params) => renderPage('settings', params));
     Router.register('models', (params) => renderPage('models', params));

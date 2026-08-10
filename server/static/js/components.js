@@ -171,6 +171,7 @@ const Components = (() => {
       { section: '管理', items: [
         { key: 'contracts', label: '合同管理', icon: 'fileText' },
         { key: 'knowledge', label: '知识库', icon: 'book' },
+        { key: 'memory', label: '记忆', icon: 'layers' },
       ]},
       { section: '系统', items: [
         { key: 'sync', label: '同步管理', icon: 'cloud' },
