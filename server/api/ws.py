@@ -127,7 +127,17 @@ async def websocket_client(websocket: WebSocket):
                                 overall_score=result.overall_score,
                                 summary=result.summary,
                                 recommendation=result.recommendation,
-                                raw_result=json.dumps({"clauses": result.clauses}, ensure_ascii=False),
+                                raw_result=json.dumps(
+                                    {
+                                        "clauses": result.clauses,
+                                        "session_id": result.session_id
+                                        if isinstance(
+                                            getattr(result, "session_id", None), str
+                                        )
+                                        else "",
+                                    },
+                                    ensure_ascii=False,
+                                ),
                                 source="mobile",
                             )
                             db.add(analysis)
@@ -174,6 +184,9 @@ async def websocket_client(websocket: WebSocket):
                             "redCount": result.red_count,
                             "yellowCount": result.yellow_count,
                             "greenCount": result.green_count,
+                            "sessionId": result.session_id
+                            if isinstance(getattr(result, "session_id", None), str)
+                            else "",
                             "clauses": [
                                 {
                                     "id": c.get("clause_number", ""),

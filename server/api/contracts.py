@@ -162,6 +162,18 @@ async def get_contract(
             else:
                 green += 1
 
+    # 从 raw_result 透出记忆 session_id（旧数据无此字段则空串）
+    session_id = ""
+    if analysis and analysis.raw_result:
+        try:
+            raw = json.loads(analysis.raw_result)
+            if isinstance(raw, dict):
+                sid = raw.get("session_id") or ""
+                if isinstance(sid, str):
+                    session_id = sid
+        except (json.JSONDecodeError, TypeError):
+            pass
+
     return {
         "id": contract.id,
         "title": contract.title or "未命名合同",
@@ -178,6 +190,7 @@ async def get_contract(
         "summary": analysis.summary if analysis else "",
         "recommendation": analysis.recommendation if analysis else "",
         "fullText": contract.ocr_text or "",
+        "sessionId": session_id,
         "clauses": clauses_data,
     }
 
@@ -329,7 +342,15 @@ async def analyze_contract(
                         overall_score=result.overall_score,
                         summary=result.summary,
                         recommendation=result.recommendation,
-                        raw_result=json.dumps({"clauses": result.clauses}, ensure_ascii=False),
+                        raw_result=json.dumps(
+                            {
+                                "clauses": result.clauses,
+                                "session_id": result.session_id
+                                if isinstance(getattr(result, "session_id", None), str)
+                                else "",
+                            },
+                            ensure_ascii=False,
+                        ),
                         source="local",
                     )
                     session.add(analysis)
@@ -364,6 +385,9 @@ async def analyze_contract(
             "contractId": contract_id,
             "score": result.overall_score,
             "riskLevel": "red" if result.red_count > 0 else ("yellow" if result.yellow_count > 0 else "green"),
+            "sessionId": result.session_id
+            if isinstance(getattr(result, "session_id", None), str)
+            else "",
         })
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
