@@ -121,11 +121,13 @@ async def analyze_dimension(
     contract_type: str,
     kb_rules: list[str] | None = None,
     kb_laws: list[dict] | None = None,
+    memory_context: str = "",
 ) -> list[ClauseRisk]:
     """
     单个维度的 Worker：分析一批条款的风险。
 
     只分析 relevance 包含该维度的条款。如果没有匹配条款，返回空列表。
+    memory_context: 可选的分层记忆/规则/Skill 上下文，注入 user prompt。
     """
     # 筛选属于本维度的条款
     relevant = [c for c in clauses if dimension in c.relevance]
@@ -143,6 +145,9 @@ async def analyze_dimension(
     )
 
     user_content = f"合同类型：{contract_type}\n\n条款列表：\n{clauses_input}"
+
+    if memory_context and memory_context.strip():
+        user_content += f"\n\n## 记忆与知识\n{memory_context.strip()}"
 
     if kb_rules:
         user_content += "\n\n相关知识库规则（供参考）：\n" + "\n".join(f"- {r}" for r in kb_rules)
@@ -208,11 +213,13 @@ async def analyze_dimension_with_context(
     cross_context: str,
     kb_rules: list[str] | None = None,
     kb_laws: list[dict] | None = None,
+    memory_context: str = "",
 ) -> ClauseRisk | None:
     """
     带跨维度上下文的单条款分析（用于第二轮冲突解决）。
 
     cross_context: 其他维度对该条款的评级摘要，注入 prompt 让 LLM 参考。
+    memory_context: 可选记忆/Wiki/Skill 补充上下文。
     """
     system_prompt = (
         f"你是合同审查的{WORKER_DIMENSIONS[dimension]['name']}专家。\n"
@@ -246,6 +253,9 @@ async def analyze_dimension_with_context(
         ensure_ascii=False,
     )
     user_content = f"合同类型：{contract_type}\n\n条款列表：\n{clauses_input}"
+
+    if memory_context and memory_context.strip():
+        user_content += f"\n\n## 记忆与知识\n{memory_context.strip()}"
 
     if kb_rules:
         user_content += "\n\n相关知识库规则（供参考）：\n" + "\n".join(f"- {r}" for r in kb_rules)
