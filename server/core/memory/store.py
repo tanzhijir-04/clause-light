@@ -18,11 +18,21 @@ from server.models.database import (
 )
 
 
+def _as_json_text(value: Any) -> str | None:
+    """list/dict 序列化为 JSON 文本；已是 str/None 则原样返回"""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False)
+
+
 async def start_session(
     db: AsyncSession,
     *,
     contract_id: str | None = None,
     contract_type: str | None = None,
+    owner_user_id: str = "local",
 ) -> str:
     """创建 L0 记忆会话，返回 session id"""
     sid = uuid.uuid4().hex
@@ -31,6 +41,7 @@ async def start_session(
         contract_id=contract_id,
         contract_type=contract_type,
         status="open",
+        owner_user_id=owner_user_id or "local",
     )
     db.add(session)
     await db.flush()
@@ -72,7 +83,7 @@ async def upsert_atom(db: AsyncSession, data: dict[str, Any]) -> str:
             embedding=data.get("embedding"),
             owner_user_id=data.get("owner_user_id", "local"),
             visibility=data.get("visibility", "private"),
-            acl_json=data.get("acl_json"),
+            acl_json=_as_json_text(data.get("acl_json")),
         )
         db.add(atom)
     else:
@@ -86,10 +97,11 @@ async def upsert_atom(db: AsyncSession, data: dict[str, Any]) -> str:
             "embedding",
             "owner_user_id",
             "visibility",
-            "acl_json",
         ):
             if key in data:
                 setattr(existing, key, data[key])
+        if "acl_json" in data:
+            existing.acl_json = _as_json_text(data["acl_json"])
     await db.flush()
     return atom_id
 
@@ -116,7 +128,7 @@ async def upsert_scenario(db: AsyncSession, data: dict[str, Any]) -> str:
             embedding=data.get("embedding"),
             owner_user_id=data.get("owner_user_id", "local"),
             visibility=data.get("visibility", "private"),
-            acl_json=data.get("acl_json"),
+            acl_json=_as_json_text(data.get("acl_json")),
         )
         db.add(scenario)
     else:
@@ -129,12 +141,13 @@ async def upsert_scenario(db: AsyncSession, data: dict[str, Any]) -> str:
             "embedding",
             "owner_user_id",
             "visibility",
-            "acl_json",
         ):
             if key in data:
                 setattr(existing, key, data[key])
         if "atom_ids" in data:
             existing.atom_ids = atom_ids_json
+        if "acl_json" in data:
+            existing.acl_json = _as_json_text(data["acl_json"])
     await db.flush()
     return scenario_id
 
@@ -153,7 +166,7 @@ async def upsert_persona(db: AsyncSession, data: dict[str, Any]) -> str:
             embedding=data.get("embedding"),
             owner_user_id=data.get("owner_user_id", "local"),
             visibility=data.get("visibility", "private"),
-            acl_json=data.get("acl_json"),
+            acl_json=_as_json_text(data.get("acl_json")),
         )
         db.add(persona)
     else:
@@ -165,10 +178,11 @@ async def upsert_persona(db: AsyncSession, data: dict[str, Any]) -> str:
             "embedding",
             "owner_user_id",
             "visibility",
-            "acl_json",
         ):
             if key in data:
                 setattr(existing, key, data[key])
+        if "acl_json" in data:
+            existing.acl_json = _as_json_text(data["acl_json"])
     await db.flush()
     return persona_id
 

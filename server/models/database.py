@@ -148,6 +148,7 @@ class MemorySession(Base):
     contract_id = Column(String, nullable=True)
     contract_type = Column(String, nullable=True)
     status = Column(String, default="open")  # open|closed
+    owner_user_id = Column(String, default="local")
     created_at = Column(DateTime, default=func.now())
     closed_at = Column(DateTime, nullable=True)
 
