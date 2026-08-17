@@ -18,6 +18,7 @@ from sqlalchemy import (
     String,
     Text,
     func,
+    inspect,
 )
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
@@ -304,10 +305,52 @@ async_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_o
 
 
 async def init_db() -> None:
-    """创建所有表"""
+    """创建所有表，并补齐已有表的新增列"""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    await migrate_schema(engine)
     logger.info("数据库初始化完成")
+
+
+# ── 轻量迁移 ──
+
+# 新分支在已有表上新增的列（create_all 不会修改已有表，需手动 ALTER）
+_LEGACY_COLUMN_MIGRATIONS: dict[str, tuple[str, str, object]] = {
+    "knowledge_rules": ("status", "VARCHAR", "active"),
+}
+
+
+async def migrate_schema(engine) -> None:
+    """为已有表补齐新分支新增的列（幂等），并回填兼容字段"""
+
+    def _run(sync_conn) -> None:
+        inspector = inspect(sync_conn)
+        tables = set(inspector.get_table_names())
+        for table_name, (col_name, col_type, default) in _LEGACY_COLUMN_MIGRATIONS.items():
+            if table_name not in tables:
+                continue
+            columns = {c["name"] for c in inspector.get_columns(table_name)}
+            if col_name in columns:
+                continue
+            if isinstance(default, str):
+                default_sql = f"'{default}'"
+            elif isinstance(default, bool):
+                default_sql = "1" if default else "0"
+            else:
+                default_sql = str(default)
+            sync_conn.exec_driver_sql(
+                f'ALTER TABLE "{table_name}" ADD COLUMN "{col_name}" {col_type} DEFAULT {default_sql}'
+            )
+            logger.info("数据库迁移: %s 表新增列 %s", table_name, col_name)
+            if table_name == "knowledge_rules" and col_name == "status":
+                # 旧数据按 is_active 回填 status
+                sync_conn.exec_driver_sql(
+                    "UPDATE knowledge_rules SET status = "
+                    "CASE WHEN is_active THEN 'active' ELSE 'disabled' END"
+                )
+
+    async with engine.begin() as conn:
+        await conn.run_sync(_run)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

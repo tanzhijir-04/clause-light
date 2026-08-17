@@ -30,6 +30,9 @@ from server.models.database import (
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/contracts", tags=["contracts"])
 
+# 后台分析任务集合：客户端断开后任务仍继续执行，避免结果丢失
+_background_tasks: set[asyncio.Task] = set()
+
 
 @router.get("/")
 async def list_contracts(
@@ -195,6 +198,79 @@ async def get_contract(
     }
 
 
+async def persist_analysis_result(
+    contract_id: str,
+    result,
+    session_factory=None,
+) -> str | None:
+    """保存分析结果到数据库（独立 session）；成功返回 None，失败返回错误信息。
+
+    在后台任务内执行，即使 SSE 连接断开也会完成写入。
+    session_factory 可注入，便于测试替换内存数据库。
+    """
+    if session_factory is None:
+        session_factory = async_session_factory
+
+    try:
+        async with session_factory() as session:
+            # 更新合同记录
+            await session.execute(
+                sa_update(Contract)
+                .where(Contract.id == contract_id)
+                .values(
+                    ocr_text=result.ocr_text or "",
+                    type=result.contract_type,
+                    updated_at=datetime.now(timezone.utc),
+                )
+            )
+
+            # 保存分析结果
+            if result.contract_id:
+                analysis = Analysis(
+                    id=result.contract_id,
+                    contract_id=contract_id,
+                    model_used=result.model_used,
+                    overall_score=result.overall_score,
+                    summary=result.summary,
+                    recommendation=result.recommendation,
+                    raw_result=json.dumps(
+                        {
+                            "clauses": result.clauses,
+                            "session_id": result.session_id
+                            if isinstance(getattr(result, "session_id", None), str)
+                            else "",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    source="local",
+                )
+                session.add(analysis)
+
+                for clause in result.clauses:
+                    clause_analysis = ClauseAnalysis(
+                        id=uuid.uuid4().hex,
+                        analysis_id=analysis.id,
+                        clause_number=clause.get("clause_number", ""),
+                        clause_title=clause.get("title", ""),
+                        clause_content=clause.get("content", ""),
+                        risk_level=clause.get("risk_level", "green"),
+                        risk_type=clause.get("risk_type", ""),
+                        risk_summary=clause.get("risk_summary", ""),
+                        plain_explanation=clause.get("plain_explanation", ""),
+                        legal_basis=clause.get("legal_basis", ""),
+                        severity_score=clause.get("severity_score", 1),
+                        suggested_clause=clause.get("suggested_clause", ""),
+                        can_negotiate=clause.get("can_negotiate", False),
+                    )
+                    session.add(clause_analysis)
+
+            await session.commit()
+        return None
+    except Exception as e:
+        logger.error("保存分析结果失败: %s", e)
+        return f"结果保存失败: {e}"
+
+
 @router.post("/analyze")
 async def analyze_contract(
     file: UploadFile = File(...),
@@ -281,13 +357,19 @@ async def analyze_contract(
         embedding.set_progress_callback(on_embedding_progress)
 
         async def run_agent():
-            """在后台运行 Agent，完成后放入结束标记"""
+            """在后台运行 Agent 并保存结果，完成后放入结束标记"""
             try:
-                return await agent.analyze(
+                result = await agent.analyze(
                     file_path=file_path,
                     contract_type_hint=contract_type if contract_type else None,
                     on_step=on_progress,
                 )
+                # 保存结果在后台任务内完成，客户端断开也不丢失
+                if not getattr(result, "error", ""):
+                    save_error = await persist_analysis_result(contract_id, result)
+                    if save_error:
+                        result.error = save_error
+                return result
             except Exception as e:
                 logger.error("Agent 分析异常: %s", e)
                 return type('obj', (object,), {'error': f'合同分析异常: {e}', 'ocr_text': '', 'contract_id': ''})()
@@ -307,7 +389,9 @@ async def analyze_contract(
                     break
                 yield _sse_event(event)
         except asyncio.CancelledError:
-            agent_task.cancel()
+            # 客户端断开：不取消后台任务，让分析继续完成后保存结果
+            _background_tasks.add(agent_task)
+            agent_task.add_done_callback(_background_tasks.discard)
             return
 
         # 等待 Agent 完成并获取结果
@@ -317,66 +401,6 @@ async def analyze_contract(
         if result.error:
             logger.warning("合同分析失败: %s", result.error)
             yield _sse_event({"type": "error", "message": result.error})
-            return
-
-        # 保存结果到数据库（使用独立 session，不依赖请求级 session）
-        try:
-            async with async_session_factory() as session:
-                # 更新合同记录
-                await session.execute(
-                    sa_update(Contract)
-                    .where(Contract.id == contract_id)
-                    .values(
-                        ocr_text=result.ocr_text or "",
-                        type=result.contract_type,
-                        updated_at=datetime.now(timezone.utc),
-                    )
-                )
-
-                # 保存分析结果
-                if result.contract_id:
-                    analysis = Analysis(
-                        id=result.contract_id,
-                        contract_id=contract_id,
-                        model_used=result.model_used,
-                        overall_score=result.overall_score,
-                        summary=result.summary,
-                        recommendation=result.recommendation,
-                        raw_result=json.dumps(
-                            {
-                                "clauses": result.clauses,
-                                "session_id": result.session_id
-                                if isinstance(getattr(result, "session_id", None), str)
-                                else "",
-                            },
-                            ensure_ascii=False,
-                        ),
-                        source="local",
-                    )
-                    session.add(analysis)
-
-                    for clause in result.clauses:
-                        clause_analysis = ClauseAnalysis(
-                            id=uuid.uuid4().hex,
-                            analysis_id=analysis.id,
-                            clause_number=clause.get("clause_number", ""),
-                            clause_title=clause.get("title", ""),
-                            clause_content=clause.get("content", ""),
-                            risk_level=clause.get("risk_level", "green"),
-                            risk_type=clause.get("risk_type", ""),
-                            risk_summary=clause.get("risk_summary", ""),
-                            plain_explanation=clause.get("plain_explanation", ""),
-                            legal_basis=clause.get("legal_basis", ""),
-                            severity_score=clause.get("severity_score", 1),
-                            suggested_clause=clause.get("suggested_clause", ""),
-                            can_negotiate=clause.get("can_negotiate", False),
-                        )
-                        session.add(clause_analysis)
-
-                await session.commit()
-        except Exception as e:
-            logger.error("保存分析结果失败: %s", e)
-            yield _sse_event({"type": "error", "message": f"结果保存失败: {e}"})
             return
 
         # 推送最终结果

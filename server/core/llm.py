@@ -92,6 +92,8 @@ class LLMGateway:
     def __init__(self) -> None:
         self._clients: dict[str, AsyncOpenAI] = {}
         self._config: dict = {}
+        # 记录不支持 json_schema response_format 的 (provider, model)，后续跳过 Outlines
+        self._structured_unsupported: set[tuple[str, str]] = set()
         self._init_clients()
 
     # ── 配置加载 ──
@@ -392,6 +394,13 @@ class LLMGateway:
             if not client:
                 continue
             model_name = self._get_model(provider, task)
+            if (provider, model_name) in self._structured_unsupported:
+                logger.debug(
+                    "跳过 Outlines（该模型不支持 response_format）: provider=%s model=%s",
+                    provider,
+                    model_name,
+                )
+                continue
             start = time.monotonic()
             try:
                 omodel = outlines.from_openai(client, model_name)
@@ -440,6 +449,17 @@ class LLMGateway:
                     model_name,
                     e,
                 )
+                if (
+                    "response_format" in str(e).lower()
+                    or "unavailable now" in str(e).lower()
+                ):
+                    # 该模型不支持 json_schema 结构化输出，记录后跳过，避免每次调用都失败一次
+                    self._structured_unsupported.add((provider, model_name))
+                    logger.warning(
+                        "Outlines 不支持当前模型，已记录并跳过后续调用: provider=%s model=%s",
+                        provider,
+                        model_name,
+                    )
                 continue
 
         if last_error:

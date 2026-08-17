@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from io import BytesIO
 from typing import AsyncGenerator
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -270,6 +271,98 @@ class TestAnalyzeContract:
             # SSE 流：至少推送了 result 事件
             assert "result" in response.text or '"score"' in response.text
             MockAgent.return_value.analyze.assert_called_once()
+
+
+class TestPersistAnalysisResult:
+    """分析结果持久化：保存必须在后台任务内完成，断开连接也不丢结果"""
+
+    async def test_persist_saves_analysis_and_clauses(self, db_session):
+        """持久化成功时写入分析记录与条款分析，并更新合同信息"""
+        from server.api.contracts import persist_analysis_result
+        from tests.conftest import test_session_factory
+
+        contract = Contract(id="persist_contract", title="待分析", type="其他")
+        db_session.add(contract)
+        await db_session.commit()
+
+        result = SimpleNamespace(
+            ocr_text="合同全文",
+            contract_type="租赁合同",
+            contract_id="persist_analysis",
+            model_used="deepseek-chat",
+            overall_score=55,
+            summary="存在风险",
+            recommendation="negotiate_first",
+            clauses=[
+                {
+                    "clause_number": "第一条",
+                    "title": "租金",
+                    "content": "逾期每日 5‰ 违约金",
+                    "risk_level": "red",
+                    "risk_type": "违约金过高",
+                    "risk_summary": "违约金过高",
+                    "plain_explanation": "比例偏高",
+                    "legal_basis": "《民法典》",
+                    "severity_score": 8,
+                    "suggested_clause": "建议调整",
+                    "can_negotiate": True,
+                }
+            ],
+            session_id="mem_session_1",
+            error="",
+        )
+
+        err = await persist_analysis_result("persist_contract", result, test_session_factory)
+
+        assert err is None
+
+        analysis = await db_session.get(Analysis, "persist_analysis")
+        assert analysis is not None
+        assert analysis.contract_id == "persist_contract"
+        assert analysis.overall_score == 55
+        assert analysis.recommendation == "negotiate_first"
+        assert "mem_session_1" in (analysis.raw_result or "")
+
+        clauses = (
+            await db_session.execute(
+                select(ClauseAnalysis).where(ClauseAnalysis.analysis_id == "persist_analysis")
+            )
+        ).scalars().all()
+        assert len(clauses) == 1
+        assert clauses[0].risk_level == "red"
+        assert clauses[0].severity_score == 8
+
+        refreshed = await db_session.get(Contract, "persist_contract")
+        await db_session.refresh(refreshed)
+        assert refreshed.type == "租赁合同"
+        assert refreshed.ocr_text == "合同全文"
+
+    async def test_persist_skips_when_result_has_no_contract_id(self, db_session):
+        """结果缺少 contract_id 时只更新合同信息，不写分析记录"""
+        from server.api.contracts import persist_analysis_result
+        from tests.conftest import test_session_factory
+
+        contract = Contract(id="persist_no_analysis", title="待分析", type="其他")
+        db_session.add(contract)
+        await db_session.commit()
+
+        result = SimpleNamespace(
+            ocr_text="全文",
+            contract_type="租赁合同",
+            contract_id="",
+            clauses=[],
+            error="",
+        )
+
+        err = await persist_analysis_result("persist_no_analysis", result, test_session_factory)
+        assert err is None
+
+        analyses = (
+            await db_session.execute(
+                select(Analysis).where(Analysis.contract_id == "persist_no_analysis")
+            )
+        ).scalars().all()
+        assert analyses == []
 
 
 class TestSubmitFeedback:

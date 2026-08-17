@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import BaseModel
+from openai import APIError
 
 from server.core.llm import LLMGateway, StructuredLLMResponse
 from server.core.schemas.llm_outputs import (
@@ -120,3 +121,57 @@ async def test_chat_structured_uses_outlines_when_available(monkeypatch):
     assert result.via == "outlines"
     assert result.parsed is not None
     assert result.parsed.contract_type == "劳动合同"
+
+
+@pytest.mark.asyncio
+async def test_outlines_skipped_after_unsupported_response_format(monkeypatch):
+    """提供商不支持 json_schema response_format 时，应记录并跳过后续 Outlines 尝试"""
+    gw = LLMGateway()
+    gw._clients = {"custom": MagicMock()}
+    gw._config = {
+        "remote": {
+            "enabled": True,
+            "provider": "custom",
+            "models": {"analyze": "deepseek-v4-flash"},
+        },
+        "local": {"enabled": False},
+    }
+    monkeypatch.setattr("server.core.llm.settings.OUTLINES_ENABLED", True)
+    monkeypatch.setattr(gw, "_get_available_providers", lambda: ["custom"])
+    monkeypatch.setattr(gw, "_get_model", lambda p, t: "deepseek-v4-flash")
+
+    class FakeOutlinesModel:
+        """模拟 DeepSeek 返回 400：response_format 类型不可用"""
+
+        async def __call__(self, chat_input, schema, **kwargs):
+            raise APIError(
+                message="This response_format type is unavailable now",
+                request=MagicMock(),
+                body=None,
+            )
+
+    import outlines
+
+    monkeypatch.setattr(outlines, "from_openai", lambda c, m: FakeOutlinesModel())
+
+    resp = await gw._chat_via_outlines(
+        [{"role": "user", "content": "解析"}],
+        ParseResultSchema,
+        "analysis",
+        0.1,
+    )
+    assert resp.parsed is None
+    assert ("custom", "deepseek-v4-flash") in gw._structured_unsupported
+
+    # 第二次调用不应再尝试 Outlines（from_openai 不应被调用）
+    def should_not_be_called(*args, **kwargs):
+        raise AssertionError("不应再次尝试 Outlines")
+
+    monkeypatch.setattr(outlines, "from_openai", should_not_be_called)
+    resp2 = await gw._chat_via_outlines(
+        [{"role": "user", "content": "解析"}],
+        ParseResultSchema,
+        "analysis",
+        0.1,
+    )
+    assert resp2.parsed is None

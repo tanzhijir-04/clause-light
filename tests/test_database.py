@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from server.models.database import (
     Analysis,
@@ -13,6 +14,7 @@ from server.models.database import (
     LegalReference,
     SyncLog,
     async_session_factory,
+    migrate_schema,
 )
 
 
@@ -148,6 +150,78 @@ class TestKnowledgeRuleModel:
         fetched = result.scalar_one_or_none()
         assert fetched is not None
         assert fetched.is_active is False
+
+
+class TestSchemaMigration:
+    """旧库迁移测试：新分支新增列必须补齐，create_all 不会改已有表"""
+
+    async def test_migrate_adds_status_column_to_legacy_knowledge_rules(self, tmp_path):
+        """旧版 knowledge_rules 表缺少 status 列时，迁移后应补齐并回填状态"""
+        db_file = tmp_path / "legacy.db"
+        engine = create_async_engine(f"sqlite+aiosqlite:///{db_file.as_posix()}")
+
+        # 构造旧版 knowledge_rules 表（无 status 列）
+        async with engine.begin() as conn:
+            await conn.execute(text("""
+                CREATE TABLE knowledge_rules (
+                    id VARCHAR PRIMARY KEY,
+                    category VARCHAR NOT NULL,
+                    rule_text TEXT NOT NULL,
+                    trigger_keywords TEXT,
+                    embedding TEXT,
+                    confidence FLOAT,
+                    source VARCHAR,
+                    usage_count INTEGER,
+                    confirm_count INTEGER,
+                    reject_count INTEGER,
+                    is_active BOOLEAN,
+                    created_at DATETIME,
+                    updated_at DATETIME
+                )
+            """))
+            await conn.execute(text(
+                "INSERT INTO knowledge_rules (id, category, rule_text, is_active) VALUES ('r1', '通用', '测试规则', 1)"
+            ))
+            await conn.execute(text(
+                "INSERT INTO knowledge_rules (id, category, rule_text, is_active) VALUES ('r2', '通用', '停用规则', 0)"
+            ))
+
+        try:
+            await migrate_schema(engine)
+
+            async with engine.connect() as conn:
+                cols = {
+                    row[1]
+                    for row in (await conn.execute(text("PRAGMA table_info(knowledge_rules)"))).fetchall()
+                }
+            assert "status" in cols, "迁移后应存在 status 列"
+
+            # 旧数据按 is_active 回填 status
+            async with engine.connect() as conn:
+                rows = {
+                    r[0]: r[1]
+                    for r in (await conn.execute(
+                        text("SELECT id, status FROM knowledge_rules")
+                    )).fetchall()
+                }
+            assert rows["r1"] == "active"
+            assert rows["r2"] == "disabled"
+
+            # ORM 全列查询可正常执行（迁移前会因缺少 status 列而报错）
+            from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+            session_factory = async_sessionmaker(
+                engine, class_=AsyncSession, expire_on_commit=False
+            )
+            async with session_factory() as session:
+                result = await session.execute(
+                    select(KnowledgeRule).order_by(KnowledgeRule.id)
+                )
+                rules = result.scalars().all()
+            assert len(rules) == 2
+            assert rules[0].status == "active"
+        finally:
+            await engine.dispose()
 
 
 class TestSyncLogModel:
