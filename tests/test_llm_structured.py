@@ -75,6 +75,7 @@ async def test_chat_structured_fallback_when_outlines_disabled(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_chat_structured_uses_outlines_when_available(monkeypatch):
+    outlines = pytest.importorskip("outlines")
     gw = LLMGateway()
     client = MagicMock()
     gw._clients = {"deepseek": client}
@@ -126,6 +127,7 @@ async def test_chat_structured_uses_outlines_when_available(monkeypatch):
 @pytest.mark.asyncio
 async def test_outlines_skipped_after_unsupported_response_format(monkeypatch):
     """提供商不支持 json_schema response_format 时，应记录并跳过后续 Outlines 尝试"""
+    outlines = pytest.importorskip("outlines")
     gw = LLMGateway()
     gw._clients = {"custom": MagicMock()}
     gw._config = {
@@ -149,8 +151,6 @@ async def test_outlines_skipped_after_unsupported_response_format(monkeypatch):
                 request=MagicMock(),
                 body=None,
             )
-
-    import outlines
 
     monkeypatch.setattr(outlines, "from_openai", lambda c, m: FakeOutlinesModel())
 

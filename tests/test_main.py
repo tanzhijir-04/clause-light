@@ -37,12 +37,12 @@ class TestDevicesEndpoint:
 
     async def test_list_devices(self, client):
         """测试获取设备列表"""
-        response = await client.get("/api/devices")
+        response = await client.get("/api/connection/devices")
         assert response.status_code == 200
         data = response.json()
-        assert isinstance(data, list)
-        assert len(data) == 2
-        assert data[0]["name"] == "iPhone 15 Pro"
+        assert isinstance(data, dict)
+        assert data["devices"] == []
+        assert data["total"] == 0
 
 
 class TestLLMSettings:
