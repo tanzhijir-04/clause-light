@@ -2,7 +2,9 @@
 
 > 本台账的基线区块在任务 1 完成时冻结。后续只能追加证据，不得改写、删除或倒填基线事实。
 
-## 不可变基线（2026-08-29）
+## 不可变基线（Task 1 前置基线，2026-08-29）
+
+以下 `769e9b43` HEAD/status/Python/pytest 区块是不可变的 Task 1 前置基线；后续验证只能追加记录，不得改写其中的历史事实。
 
 - 执行日期：`2026-08-29`
 - 仓库：`<repository-root>`（提交文档不记录绝对工作站路径）
@@ -26,6 +28,14 @@
 - 基线测试输出摘要：`255 items collected; 253 passed, 2 skipped, 23 warnings; exit code 0; 61.41s`
 - 基线测试警告：包含 Requests 依赖版本警告、Starlette 弃用警告及既有测试中的 RuntimeWarning；警告不改变上述通过/跳过统计。
 
+## Task 1 最终验证记录（当前 Task 1 HEAD）
+
+- 验证基于 HEAD：`89442c351441aa8488af8adce3ce7e18d74c0e11`（短 SHA：`89442c35`）；本记录追加于不可变的 `769e9b43` 前置基线之后，不改写基线。
+- 两份内嵌校验器逐字同步：示例 manifest 校验通过，输出 `valid: experiments\\contract_pipeline\\manifest.example.jsonl (1 independent groups)`，exit code `0`。
+- 两份内嵌校验器的预期失败比较门禁均按预期失败，输出 `comparison set requires at least 6 independent groups, with 2 rental, 2 labor, and 2 service groups`，exit code `1`。
+- `python -m json.tool experiments/contract_pipeline/config.json`：exit code `0`。
+- `git diff --check`：exit code `0`；仅有既有/本次 Markdown 文件的 LF→CRLF 转换提示，无 whitespace error。
+
 ## 证据等级与编号
 
 证据等级按强度和可复核性分为四级：
@@ -45,7 +55,7 @@
 
 `contract_type` 只能为 `rental`、`labor`、`service`；`source_kind` 只能为 `authorized`（合成/演示占位）或 `txt`、`pdf`、`image`。最小比较样本为 6 个独立文本：租赁、劳动、服务各 2 个。同一独立文本的 PDF/TXT/图片变体必须使用相同 `independent_group`，并且只计数一次。未达到该规则时，实验只能标记为 development-only，不得作跨类型比较结论。
 
-仅允许使用已获授权处理的私有数据；`authorization_note` 必须非空并能说明授权依据，`input_path` 必须指向仓库外的私有路径。字面量 `<private-input-path>` 前缀只允许在已提交的 example 校验模式中出现；真实私有输入文件必须实际存在于私有路径，并在运行前有授权记录。真实合同、个人信息、API key、含合同正文或个人信息的 raw output 均禁止提交到仓库。私有数据应放在仓库外或由忽略规则保护的位置；聚合 Markdown 不得回填合同正文。
+仅允许使用已获授权处理的私有数据；`authorization_note` 是操作员对授权依据的 attestation，引用仓库外另行保留的授权证据。它必须是非空、非敏感字符串；本校验器只检查其为非空字符串，并不机器核验法律所有权或同意，也不替代外部授权证据。真实运行必须具备该外部授权依据。`input_path` 必须指向仓库外的私有路径。字面量 `<private-input-path>` 前缀只允许在已提交的 example 校验模式中出现；真实私有输入文件必须实际存在于私有路径，并在运行前有授权记录。真实合同、个人信息、API key、含合同正文或个人信息的 raw output 均禁止提交到仓库。私有数据应放在仓库外或由忽略规则保护的位置；聚合 Markdown 不得回填合同正文。
 
 ### Manifest 标准库校验
 
