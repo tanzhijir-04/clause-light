@@ -65,9 +65,9 @@ TYPE_EN_MAP: dict[str, str] = {
 
 def normalize_contract_text(text: str) -> str:
     """Normalize Stage 1 text using the frontend's coordinate semantics."""
-    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    normalized = text
     normalized = re.sub(r"\n{3,}", "\n\n", normalized)
-    normalized = re.sub(r"(?<!\n)\n(?!\n)", " ", normalized)
+    normalized = re.sub(r"([^\n])\n([^\n])", r"\1 \2", normalized)
     normalized = re.sub(r" {2,}", " ", normalized)
     return normalized.strip()
 
@@ -435,7 +435,10 @@ async def _parse_single_chunk(
                     and (
                         not isinstance(relevance, list)
                         or not relevance
-                        or any(item not in VALID_RELEVANCE for item in relevance)
+                        or any(
+                            not isinstance(item, str) or item not in VALID_RELEVANCE
+                            for item in relevance
+                        )
                     )
                 ):
                     sanitized_clause["relevance"] = TYPE_TO_WORKERS.get(
@@ -487,7 +490,10 @@ async def _parse_single_chunk(
             index in invalid_relevance_positions
             or not isinstance(relevance, list)
             or not relevance
-            or any(item not in VALID_RELEVANCE for item in relevance)
+            or any(
+                not isinstance(item, str) or item not in VALID_RELEVANCE
+                for item in relevance
+            )
         )
         if invalid_relevance:
             relevance = TYPE_TO_WORKERS.get(clause_type, ["general"])

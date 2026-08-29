@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -47,6 +48,27 @@ def test_normalize_contract_text_matches_frontend_spacing_semantics() -> None:
     text = "  第一条\n  付款   条件\n\n\n第二段  "
 
     assert normalize_contract_text(text) == "第一条 付款 条件\n\n第二段"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "甲\r\n乙\r丙\n丁\n\n\n戊",
+        "甲\n乙\n丙",
+    ],
+)
+def test_normalize_contract_text_matches_frontend_line_break_coordinates(
+    text: str,
+) -> None:
+    def frontend_normalize_ocr_text(value: str) -> str:
+        if not value:
+            return ""
+        normalized = re.sub(r"\n{3,}", "\n\n", value)
+        normalized = re.sub(r"([^\n])\n([^\n])", r"\1 \2", normalized)
+        normalized = re.sub(r" {2,}", " ", normalized)
+        return normalized.strip()
+
+    assert normalize_contract_text(text) == frontend_normalize_ocr_text(text)
 
 
 @pytest.mark.asyncio
@@ -166,6 +188,37 @@ async def test_invalid_relevance_uses_clause_mapping_and_marks_review() -> None:
                     "title": "付款",
                     "text": "验收后付款",
                     "relevance": ["unknown-worker"],
+                }
+            ],
+        }
+    )
+
+    result = await parse_contract("验收后付款", llm)
+
+    clause = result.clauses[0]
+    assert clause.relevance == TYPE_TO_WORKERS["payment"]
+    assert clause.review_required is True
+    assert clause.review_reason
+
+
+@pytest.mark.asyncio
+async def test_unhashable_relevance_item_uses_clause_mapping_and_marks_review() -> None:
+    llm = MagicMock()
+    llm.chat_structured = AsyncMock(
+        return_value=StructuredLLMResponse(content='{"clauses": []}', parsed=None)
+    )
+    llm.parse_json = MagicMock(
+        return_value={
+            "contract_type": "租赁合同",
+            "complexity": "standard",
+            "recommended_model": "fast",
+            "clauses": [
+                {
+                    "id": "1",
+                    "type": "payment",
+                    "title": "付款",
+                    "text": "验收后付款",
+                    "relevance": [{"dimension": "financial"}],
                 }
             ],
         }
