@@ -34,7 +34,7 @@ class ClauseRiskSchema(BaseModel):
     """Stage 2 单条风险"""
 
     clause_id: str = Field(min_length=1)
-    risk_level: Literal["red", "yellow", "green"] = "green"
+    risk_level: Literal["red", "yellow", "green"]
     risk_type: str = ""
     issue: str = ""
     unfavorable_to: str = ""

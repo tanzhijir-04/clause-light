@@ -57,6 +57,24 @@ async def test_invalid_worker_json_is_unknown_and_requires_review():
 
 
 @pytest.mark.asyncio
+async def test_structured_worker_response_missing_risk_level_requires_review():
+    llm = MagicMock()
+    llm.chat_structured = AsyncMock()
+    llm.chat_structured.return_value = StructuredLLMResponse(
+        content='{"risks":[{"clause_id":"1"}]}', parsed=None
+    )
+    llm.parse_json = MagicMock(return_value={"risks": [{"clause_id": "1"}]})
+
+    results = await analyze_dimension("financial", [_clause()], llm, "服务合同")
+
+    assert len(results) == 1
+    risk = results[0]
+    assert risk.risk_level == "unknown"
+    assert risk.analysis_status == "failed"
+    assert risk.review_required is True
+
+
+@pytest.mark.asyncio
 async def test_foreign_clause_id_is_failed_for_requested_clause():
     llm = MagicMock()
     llm.chat_structured = AsyncMock()
