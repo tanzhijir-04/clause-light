@@ -77,6 +77,19 @@ def _utf16_length(text: str) -> int:
     return len(text.encode("utf-16-le")) // 2
 
 
+def _utf16_prefix(text: str, max_units: int) -> str:
+    """Return a text prefix no longer than ``max_units`` UTF-16 units."""
+    units = 0
+    end = 0
+    for index, character in enumerate(text):
+        character_units = 2 if ord(character) > 0xFFFF else 1
+        if units + character_units > max_units:
+            break
+        units += character_units
+        end = index + 1
+    return text[:end]
+
+
 # ── 数据结构 ──
 
 @dataclass
@@ -214,7 +227,7 @@ def _apply_source_locations(clauses: list[ClauseItem], source_text: str) -> bool
         match_length = len(clause.text)
         start = source_text.find(clause.text, cursor) if clause.text else -1
         if start < 0 and clause.text:
-            prefix = clause.text[:30]
+            prefix = _utf16_prefix(clause.text, 30)
             start = source_text.find(prefix, cursor)
             match_length = len(prefix)
 

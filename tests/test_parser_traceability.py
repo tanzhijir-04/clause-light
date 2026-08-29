@@ -369,6 +369,32 @@ async def test_clause_location_falls_back_to_first_30_chars_without_review() -> 
 
 
 @pytest.mark.asyncio
+async def test_clause_location_fallback_prefix_uses_utf16_units_with_astral_text() -> None:
+    prefix = "合同😀付款条件为签订后支付首期款项，余款应在验收完成后结清"
+    clause_text = prefix + "，逾期付款需承担违约责任。"
+    full_text = f"前言😀。{prefix}但原文的后续表述不同。"
+    assert len(prefix) == 29
+    assert len(prefix.encode("utf-16-le")) // 2 == 30
+
+    llm = MagicMock()
+    llm.chat_structured = AsyncMock(
+        return_value=_structured_result(
+            ParseClauseSchema(id="1", type="payment", title="付款", text=clause_text)
+        )
+    )
+
+    result = await parse_contract(full_text, llm)
+
+    normalized = normalize_contract_text(full_text)
+    clause = result.clauses[0]
+    start = len("前言😀。".encode("utf-16-le")) // 2
+    assert normalized.find(clause_text) == -1
+    assert (clause.source_start, clause.source_end) == (start, start + 30)
+    assert clause.review_required is False
+    assert result.review_required is False
+
+
+@pytest.mark.asyncio
 async def test_invalid_relevance_uses_clause_mapping_and_marks_review() -> None:
     llm = MagicMock()
     llm.chat_structured = AsyncMock(
