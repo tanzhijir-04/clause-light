@@ -20,7 +20,13 @@ from server.core.workers.workers import (
     detect_conflicts,
     failed_clause_risk,
 )
-from server.core.workers.parser import ClauseItem, ParseResult, parse_contract
+from server.core.workers.parser import (
+    TYPE_TO_WORKERS,
+    ClauseItem,
+    ParseResult,
+    parse_contract,
+    normalize_contract_text,
+)
 
 # 向后兼容：旧代码可能从 agent 模块导入 TYPE_EN_MAP
 from server.core.workers.parser import TYPE_EN_MAP  # noqa: F401
@@ -137,14 +143,25 @@ class ContractAgent:
                 contract_type=contract_type_hint or "其他",
                 clauses=[ClauseItem(
                     id="1", type="other", title="全文",
-                    text=full_text[:2000], relevance=["general"],
+                    text=normalize_contract_text(full_text), relevance=["general"],
+                    source_start=0,
+                    source_end=len(normalize_contract_text(full_text)),
+                    review_required=True,
+                    review_reason=str(e),
                 )],
                 parse_failed=True,
                 failure_reason=str(e),
+                parse_status="fallback",
+                review_required=True,
+                fallback_reason=str(e),
             )
 
         parse_failed = parse_failed or parse_result.parse_failed
-        parse_failure_reason = parse_failure_reason or parse_result.failure_reason
+        parse_failure_reason = (
+            parse_failure_reason
+            or parse_result.fallback_reason
+            or parse_result.failure_reason
+        )
         if parse_failed:
             result.error = f"合同结构解析失败: {parse_failure_reason or '未知原因'}"
 
@@ -247,6 +264,24 @@ class ContractAgent:
             logger.warning("记忆装配失败，降级为空上下文: %s", e)
 
         # ── Stage 2: 并行风险评估（含冲突解决） ──
+        # Parser normally sanitizes this field; repeat the guard at the dispatch
+        # boundary so malformed or externally constructed ParseResults cannot
+        # route a Worker using an unknown dimension.
+        for clause in parse_result.clauses:
+            relevance = clause.relevance
+            if (
+                not isinstance(relevance, list)
+                or not relevance
+                or any(dimension not in DIMENSIONS for dimension in relevance)
+            ):
+                clause_type = clause.type if clause.type in TYPE_TO_WORKERS else "other"
+                clause.relevance = TYPE_TO_WORKERS[clause_type].copy()
+                clause.review_required = True
+                clause.review_reason = (
+                    clause.review_reason or "relevance 无效，已按条款类型映射"
+                )
+                parse_result.review_required = True
+
         total_workers = len(DIMENSIONS)
         await _notify(3, 5, f"正在并行分析 {total_workers} 个维度...")
         logger.info("Stage 2: 并行风险评估 (%d 个 Worker)", total_workers)
@@ -470,6 +505,13 @@ class ContractAgent:
             result.review_reasons["pipeline"] = [
                 parse_failure_reason or "合同结构解析失败"
             ]
+        for clause in parse_result.clauses:
+            if clause.review_required:
+                result.needs_review.append(clause.id)
+                result.review_reasons.setdefault(clause.id, []).append(
+                    clause.review_reason or "需要人工复核"
+                )
+        result.needs_review = sorted(set(result.needs_review))
         for risk in all_risks:
             if risk.review_required or risk.clause_id in result.needs_review:
                 reason = risk.review_reason or risk.failure_reason or "需要人工复核"
@@ -482,7 +524,7 @@ class ContractAgent:
         ]
         has_risk_failure = any(
             risk not in usable_risks or risk.review_required for risk in all_risks
-        )
+        ) or any(clause.review_required for clause in parse_result.clauses)
         evaluation_failed = evaluation_failed or (
             bool(usable_risks)
             and eval_result.overall_score is None
@@ -527,7 +569,13 @@ class ContractAgent:
                 "unfavorable_to": risk.unfavorable_to,
                 "citation_ids": risk.citation_ids,
                 "analysis_status": risk.analysis_status,
-                "needs_review": clause.id in result.needs_review or risk.review_required,
+                "needs_review": (
+                    clause.id in result.needs_review
+                    or clause.review_required
+                    or risk.review_required
+                ),
+                "source_start": clause.source_start,
+                "source_end": clause.source_end,
             }
             result.clauses.append(clause_dict)
 

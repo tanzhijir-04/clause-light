@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 
 from server.core.llm import LLMGateway
@@ -62,6 +63,15 @@ TYPE_EN_MAP: dict[str, str] = {
 }
 
 
+def normalize_contract_text(text: str) -> str:
+    """Normalize Stage 1 text using the frontend's coordinate semantics."""
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    normalized = re.sub(r"(?<!\n)\n(?!\n)", " ", normalized)
+    normalized = re.sub(r" {2,}", " ", normalized)
+    return normalized.strip()
+
+
 # ── 数据结构 ──
 
 @dataclass
@@ -72,6 +82,10 @@ class ClauseItem:
     title: str = ""
     text: str = ""
     relevance: list[RiskDimension] = field(default_factory=lambda: ["general"])
+    source_start: int = -1
+    source_end: int = -1
+    review_required: bool = False
+    review_reason: str = ""
 
 
 @dataclass
@@ -84,6 +98,9 @@ class ParseResult:
     clauses: list[ClauseItem] = field(default_factory=list)
     parse_failed: bool = False
     failure_reason: str = ""
+    parse_status: str = "completed"  # completed / partial / fallback
+    review_required: bool = False
+    fallback_reason: str = ""
 
 
 # ── 文本分段 ──
@@ -104,7 +121,6 @@ def _chunk_text(text: str) -> list[str]:
         return [text]
 
     # 策略1：按条款标题切分（"第X条"、"第X节"、"X." 等）
-    import re
     # 匹配中文条款编号：第X条、第X节、X.X、X、（X）等
     splits = re.split(r'(?=(?:第[一二三四五六七八九十百千零\d]+[条章节]|[（(]\s*[一二三四五六七八九十百零\d]+\s*[）)]|\d+\.\d+\s|\d+\.\s))', text)
 
@@ -155,6 +171,67 @@ def _chunk_text(text: str) -> list[str]:
     return result if result else [text[:CHUNK_SIZE]]
 
 
+def _fallback_parse_result(
+    normalized_text: str,
+    contract_type: str,
+    reason: str,
+) -> ParseResult:
+    """Return a reviewable full-text clause when Stage 1 cannot parse."""
+    clause = ClauseItem(
+        id="1",
+        type="other",
+        title="全文",
+        text=normalized_text,
+        relevance=["general"],
+        source_start=0,
+        source_end=len(normalized_text),
+        review_required=True,
+        review_reason=reason,
+    )
+    return ParseResult(
+        contract_type=contract_type,
+        contract_type_en=TYPE_EN_MAP.get(contract_type, "other"),
+        clauses=[clause],
+        parse_failed=True,
+        failure_reason=reason,
+        parse_status="fallback",
+        review_required=True,
+        fallback_reason=reason,
+    )
+
+
+def _apply_source_locations(clauses: list[ClauseItem], source_text: str) -> bool:
+    """Attach monotonic normalized-text spans and report whether review is needed."""
+    cursor = 0
+    review_required = False
+    for clause in clauses:
+        clause.text = normalize_contract_text(clause.text)
+        match_length = len(clause.text)
+        start = source_text.find(clause.text, cursor) if clause.text else -1
+        if start < 0 and clause.text:
+            prefix = clause.text[:30]
+            start = source_text.find(prefix, cursor)
+            match_length = len(prefix)
+
+        if start < 0:
+            clause.source_start = -1
+            clause.source_end = -1
+            clause.review_required = True
+            clause.review_reason = "条款原文定位失败"
+            review_required = True
+            continue
+
+        clause.source_start = start
+        clause.source_end = start + match_length
+        cursor = clause.source_end
+        review_required = review_required or clause.review_required
+
+    return review_required
+
+
+VALID_RELEVANCE = {"equity", "financial", "ip", "dispute", "general"}
+
+
 # ── Stage 1: 结构解析 ──
 
 async def parse_contract(
@@ -170,8 +247,9 @@ async def parse_contract(
 
     返回 ParseResult，包含合同类型、条款数组、模型路由建议。
     """
+    normalized_text = normalize_contract_text(full_text)
     # 分段处理长合同
-    chunks = _chunk_text(full_text)
+    chunks = _chunk_text(normalized_text)
     if len(chunks) > 1:
         logger.info("合同较长（%d 字），分为 %d 段解析", len(full_text), len(chunks))
 
@@ -195,7 +273,7 @@ async def parse_contract(
         if chunk_result.parse_failed:
             parse_failed = True
             if not failure_reason:
-                failure_reason = chunk_result.failure_reason
+                failure_reason = chunk_result.failure_reason or chunk_result.fallback_reason
 
         all_clauses.extend(chunk_result.clauses)
 
@@ -213,18 +291,22 @@ async def parse_contract(
             seen.add(key)
             unique_clauses.append(clause)
 
-    result = ParseResult(
-        contract_type=contract_type,
-        contract_type_en=contract_type_en,
-        complexity=complexity,
-        recommended_model=recommended_model,
-        parse_failed=parse_failed,
-        failure_reason=failure_reason,
-        clauses=unique_clauses if unique_clauses else [ClauseItem(
-            id="1", type="other", title="全文",
-            text=full_text[:2000], relevance=["general"],
-        )],
-    )
+    if not unique_clauses:
+        reason = failure_reason or "未解析出条款"
+        result = _fallback_parse_result(normalized_text, contract_type, reason)
+    else:
+        review_required = _apply_source_locations(unique_clauses, normalized_text)
+        result = ParseResult(
+            contract_type=contract_type,
+            contract_type_en=contract_type_en,
+            complexity=complexity,
+            recommended_model=recommended_model,
+            parse_failed=parse_failed,
+            failure_reason=failure_reason,
+            parse_status="partial" if parse_failed else "completed",
+            review_required=review_required or parse_failed,
+            clauses=unique_clauses,
+        )
 
     logger.info(
         "Stage 1 完成: type=%s complexity=%s clauses=%d (from %d chunks)",
@@ -287,31 +369,94 @@ async def _parse_single_chunk(
         {"role": "user", "content": user_content},
     ]
 
-    resp = await llm.chat_structured(messages, schema=ParseResultSchema, task="analysis")
+    try:
+        resp = await llm.chat_structured(messages, schema=ParseResultSchema, task="analysis")
+    except Exception as e:
+        reason = f"LLM 调用失败: {e}"
+        logger.warning("Stage 1 LLM 调用失败: %s", e)
+        return ParseResult(
+            parse_failed=True,
+            failure_reason=reason,
+            parse_status="fallback",
+            review_required=True,
+            fallback_reason=reason,
+        )
 
     result = ParseResult()
 
-    if not resp.content and resp.parsed is None:
+    if not (resp.content or "").strip() and resp.parsed is None:
         logger.error("Stage 1 LLM 返回空内容")
+        reason = "LLM 返回空内容"
         result.parse_failed = True
-        result.failure_reason = "LLM 返回空内容"
+        result.failure_reason = reason
+        result.parse_status = "fallback"
+        result.review_required = True
+        result.fallback_reason = reason
         return result
 
     parsed_model = resp.parsed
     if parsed_model is None:
-        raw = llm.parse_json(resp.content)
+        try:
+            raw = llm.parse_json(resp.content)
+        except Exception as e:
+            reason = f"JSON 解析失败: {e}"
+            logger.warning("Stage 1 JSON 解析失败: %s", e)
+            result.parse_failed = True
+            result.failure_reason = reason
+            result.parse_status = "fallback"
+            result.review_required = True
+            result.fallback_reason = reason
+            return result
         if not isinstance(raw, dict):
             logger.warning("Stage 1 JSON 解析失败")
+            reason = "JSON 根对象不是解析结果"
             result.parse_failed = True
-            result.failure_reason = "JSON 根对象不是解析结果"
+            result.failure_reason = reason
+            result.parse_status = "fallback"
+            result.review_required = True
+            result.fallback_reason = reason
             return result
+        invalid_relevance_positions: set[int] = set()
+        raw_for_validation = dict(raw)
+        raw_clauses = raw.get("clauses", [])
+        if isinstance(raw_clauses, list):
+            sanitized_clauses = []
+            for index, clause in enumerate(raw_clauses):
+                if not isinstance(clause, dict):
+                    sanitized_clauses.append(clause)
+                    continue
+                sanitized_clause = dict(clause)
+                clause_type = sanitized_clause.get("type", "other")
+                if clause_type not in CLAUSE_TYPES:
+                    clause_type = "other"
+                relevance = sanitized_clause.get("relevance")
+                if (
+                    "relevance" in sanitized_clause
+                    and (
+                        not isinstance(relevance, list)
+                        or not relevance
+                        or any(item not in VALID_RELEVANCE for item in relevance)
+                    )
+                ):
+                    sanitized_clause["relevance"] = TYPE_TO_WORKERS.get(
+                        clause_type, ["general"]
+                    )
+                    invalid_relevance_positions.add(index)
+                sanitized_clauses.append(sanitized_clause)
+            raw_for_validation["clauses"] = sanitized_clauses
         try:
-            parsed_model = ParseResultSchema.model_validate(raw)
+            parsed_model = ParseResultSchema.model_validate(raw_for_validation)
         except Exception as e:
             logger.warning("Stage 1 Schema 校验失败: %s", e)
+            reason = f"Schema 校验失败: {e}"
             result.parse_failed = True
-            result.failure_reason = str(e)
+            result.failure_reason = reason
+            result.parse_status = "fallback"
+            result.review_required = True
+            result.fallback_reason = reason
             return result
+    else:
+        invalid_relevance_positions = set()
 
     assert isinstance(parsed_model, ParseResultSchema)
     parsed = parsed_model.model_dump()
@@ -332,14 +477,20 @@ async def _parse_single_chunk(
         result.recommended_model = "strong"
 
     # 解析条款
-    for c in raw_clauses:
+    for index, c in enumerate(raw_clauses):
         clause_type = c.get("type", "other")
         if clause_type not in CLAUSE_TYPES:
             clause_type = "other"
 
         relevance = c.get("relevance", TYPE_TO_WORKERS.get(clause_type, ["general"]))
-        if not isinstance(relevance, list):
-            relevance = ["general"]
+        invalid_relevance = (
+            index in invalid_relevance_positions
+            or not isinstance(relevance, list)
+            or not relevance
+            or any(item not in VALID_RELEVANCE for item in relevance)
+        )
+        if invalid_relevance:
+            relevance = TYPE_TO_WORKERS.get(clause_type, ["general"])
 
         result.clauses.append(ClauseItem(
             id=c.get("id", ""),
@@ -347,6 +498,10 @@ async def _parse_single_chunk(
             title=c.get("title", ""),
             text=c.get("text", ""),
             relevance=relevance,
+            review_required=invalid_relevance,
+            review_reason="relevance 无效，已按条款类型映射" if invalid_relevance else "",
         ))
+
+    result.review_required = any(clause.review_required for clause in result.clauses)
 
     return result
