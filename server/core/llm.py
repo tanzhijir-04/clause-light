@@ -9,7 +9,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
-from typing import AsyncGenerator, TypeVar
+from typing import AsyncGenerator, Callable, TypeVar
 
 from openai import AsyncOpenAI
 from pydantic import BaseModel, ValidationError
@@ -41,6 +41,25 @@ class StructuredLLMResponse(LLMResponse):
 
     parsed: BaseModel | None = None
     via: str = "fallback"  # outlines | json_schema | fallback
+
+
+@dataclass(frozen=True)
+class LLMCallRecord:
+    """不含消息内容的单次真实模型调用元数据。"""
+
+    task: str
+    provider: str
+    model: str
+    temperature: float
+    attempt: int
+    latency_ms: int
+    input_tokens: int | None
+    output_tokens: int | None
+    tokens_used: int | None
+    success: bool
+    structured_via: str
+    error_type: str = ""
+    error_message: str = ""
 
 
 @dataclass(frozen=True)
@@ -98,9 +117,19 @@ def _deep_merge(base: dict, override: dict) -> dict:
 class LLMGateway:
     """LLM 统一网关，支持多提供商、多模型、故障切换"""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        trace_sink: Callable[[LLMCallRecord], None] | None = None,
+        provider_lock: str | None = None,
+        model_lock: str | None = None,
+        structured_mode: str = "auto",
+    ) -> None:
         self._clients: dict[str, AsyncOpenAI] = {}
         self._config: dict = {}
+        self._trace_sink = trace_sink
+        self._provider_lock = provider_lock
+        self._model_lock = model_lock
+        self.structured_mode = structured_mode
         # 记录不支持 json_schema response_format 的 (provider, model)，后续跳过 Outlines
         self._structured_unsupported: set[tuple[str, str]] = set()
         self._init_clients()
@@ -225,6 +254,11 @@ class LLMGateway:
 
         优先级：配置文件 models 字段 > 硬编码 TASK_MODEL_FALLBACK
         """
+        model_lock = getattr(self, "_model_lock", None)
+        provider_lock = getattr(self, "_provider_lock", None)
+        if model_lock and (not provider_lock or provider == provider_lock):
+            return model_lock
+
         # 1. 从配置文件读取
         config_key = _TASK_TO_CONFIG_KEY.get(task, "analyze")
 
@@ -245,6 +279,10 @@ class LLMGateway:
 
     def _get_available_providers(self) -> list[str]:
         """返回有 client 的提供商列表，配置文件中的排在前面"""
+        provider_lock = getattr(self, "_provider_lock", None)
+        if provider_lock:
+            return [provider_lock]
+
         remote_provider = self._config.get("remote", {}).get("provider", "")
         providers: list[str] = []
 
@@ -260,6 +298,24 @@ class LLMGateway:
                 providers.append(p)
 
         return providers
+
+    @staticmethod
+    def _usage_int(usage, name: str) -> int | None:
+        value = getattr(usage, name, None) if usage is not None else None
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+    @staticmethod
+    def _clean_error(exc: Exception) -> str:
+        return " ".join(str(exc).split())[:200]
+
+    def _emit_trace(self, record: LLMCallRecord) -> None:
+        trace_sink = getattr(self, "_trace_sink", None)
+        if trace_sink is None:
+            return
+        try:
+            trace_sink(record)
+        except Exception as exc:  # trace must never change the model result
+            logger.warning("LLM 调用追踪写入失败: %s", type(exc).__name__)
 
     # ── LLM 调用 ──
 
@@ -301,7 +357,22 @@ class LLMGateway:
                     )
                     latency = int((time.monotonic() - start) * 1000)
                     content = response.choices[0].message.content or ""
-                    tokens = response.usage.total_tokens if response.usage else 0
+                    input_tokens = self._usage_int(response.usage, "prompt_tokens")
+                    output_tokens = self._usage_int(response.usage, "completion_tokens")
+                    tokens = self._usage_int(response.usage, "total_tokens")
+                    self._emit_trace(LLMCallRecord(
+                        task=task,
+                        provider=provider,
+                        model=model,
+                        temperature=temp,
+                        attempt=attempt + 1,
+                        latency_ms=latency,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        tokens_used=tokens,
+                        success=True,
+                        structured_via="chat",
+                    ))
 
                     logger.info(
                         "LLM 调用成功: provider=%s model=%s task=%s latency=%dms tokens=%d",
@@ -311,11 +382,27 @@ class LLMGateway:
                         content=content.strip(),
                         model=model,
                         provider=provider,
-                        tokens_used=tokens,
+                        tokens_used=tokens or 0,
                         latency_ms=latency,
                     )
                 except Exception as e:
+                    latency = int((time.monotonic() - start) * 1000)
                     last_error = e
+                    self._emit_trace(LLMCallRecord(
+                        task=task,
+                        provider=provider,
+                        model=model,
+                        temperature=temp,
+                        attempt=attempt + 1,
+                        latency_ms=latency,
+                        input_tokens=None,
+                        output_tokens=None,
+                        tokens_used=None,
+                        success=False,
+                        structured_via="chat",
+                        error_type=type(e).__name__,
+                        error_message=self._clean_error(e),
+                    ))
                     logger.warning(
                         "LLM 调用失败: provider=%s model=%s attempt=%d error=%s",
                         provider, model, attempt + 1, str(e),
@@ -345,7 +432,7 @@ class LLMGateway:
         """
         empty = StructuredLLMResponse(content="", parsed=None, via="fallback")
 
-        if settings.OUTLINES_ENABLED:
+        if settings.OUTLINES_ENABLED and self.structured_mode != "json_fallback":
             outlines_result = await self._chat_via_outlines(
                 messages, schema, task, temperature
             )
@@ -409,7 +496,7 @@ class LLMGateway:
             return StructuredLLMResponse(parsed=None, via="outlines")
 
         last_error: Exception | None = None
-        for provider in providers:
+        for attempt, provider in enumerate(providers, start=1):
             client = self._clients.get(provider)
             if not client:
                 continue
@@ -439,6 +526,21 @@ class LLMGateway:
                     parsed = self._validate_schema(content, schema)
 
                 if parsed is None:
+                    self._emit_trace(LLMCallRecord(
+                        task=task,
+                        provider=provider,
+                        model=model_name,
+                        temperature=temperature,
+                        attempt=attempt,
+                        latency_ms=latency,
+                        input_tokens=None,
+                        output_tokens=None,
+                        tokens_used=None,
+                        success=False,
+                        structured_via="outlines",
+                        error_type="SchemaValidationError",
+                        error_message="结构化结果校验失败",
+                    ))
                     logger.warning(
                         "Outlines 返回无法校验: provider=%s model=%s",
                         provider,
@@ -453,6 +555,19 @@ class LLMGateway:
                     task,
                     latency,
                 )
+                self._emit_trace(LLMCallRecord(
+                    task=task,
+                    provider=provider,
+                    model=model_name,
+                    temperature=temperature,
+                    attempt=attempt,
+                    latency_ms=latency,
+                    input_tokens=None,
+                    output_tokens=None,
+                    tokens_used=None,
+                    success=True,
+                    structured_via="outlines",
+                ))
                 return StructuredLLMResponse(
                     content=content,
                     model=model_name,
@@ -463,6 +578,21 @@ class LLMGateway:
                 )
             except Exception as e:
                 last_error = e
+                self._emit_trace(LLMCallRecord(
+                    task=task,
+                    provider=provider,
+                    model=model_name,
+                    temperature=temperature,
+                    attempt=attempt,
+                    latency_ms=int((time.monotonic() - start) * 1000),
+                    input_tokens=None,
+                    output_tokens=None,
+                    tokens_used=None,
+                    success=False,
+                    structured_via="outlines",
+                    error_type=type(e).__name__,
+                    error_message=self._clean_error(e),
+                ))
                 logger.warning(
                     "Outlines 调用失败: provider=%s model=%s error=%s",
                     provider,

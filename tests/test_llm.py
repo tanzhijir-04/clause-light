@@ -6,8 +6,13 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import BaseModel
 
-from server.core.llm import LLMGateway, LLMResponse
+from server.core.llm import LLMCallRecord, LLMGateway, LLMResponse
+
+
+class _StructuredResult(BaseModel):
+    answer: str
 
 
 class TestLLMParseJson:
@@ -203,3 +208,98 @@ class TestLLMGatewayChat:
         )
         assert result.content == "重试成功"
         assert call_count == 3
+
+    async def test_chat_trace_has_metadata_without_messages(self):
+        traces: list[LLMCallRecord] = []
+        gateway = LLMGateway(trace_sink=traces.append)
+        mock_client = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content="ok"))]
+        mock_response.usage = MagicMock(
+            prompt_tokens=12, completion_tokens=8, total_tokens=20
+        )
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+        gateway._clients = {"deepseek": mock_client}
+        gateway._get_available_providers = lambda: ["deepseek"]
+        gateway._get_model = lambda provider, task: "deepseek-chat"
+
+        await gateway.chat(
+            [{"role": "user", "content": "合同正文不应进入 trace"}],
+            task="analysis",
+        )
+
+        assert len(traces) == 1
+        record = traces[0]
+        assert record.task == "analysis"
+        assert record.provider == "deepseek"
+        assert record.model == "deepseek-chat"
+        assert record.attempt == 1
+        assert record.input_tokens == 12
+        assert record.output_tokens == 8
+        assert record.tokens_used == 20
+        assert record.success is True
+        assert record.structured_via == "chat"
+        assert not hasattr(record, "messages")
+
+    async def test_chat_trace_records_each_retry_and_clean_error(self, monkeypatch):
+        traces: list[LLMCallRecord] = []
+        gateway = LLMGateway(trace_sink=traces.append)
+        mock_client = AsyncMock()
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=RuntimeError("line one\nline two")
+        )
+        gateway._clients = {"deepseek": mock_client}
+        gateway._get_available_providers = lambda: ["deepseek"]
+        gateway._get_model = lambda provider, task: "deepseek-chat"
+        monkeypatch.setattr("server.core.llm.asyncio.sleep", AsyncMock())
+
+        result = await gateway.chat([], task="analysis", max_retries=1)
+
+        assert result.content == ""
+        assert [record.attempt for record in traces] == [1, 2]
+        assert all(record.success is False for record in traces)
+        assert all(record.error_type == "RuntimeError" for record in traces)
+        assert traces[0].error_message == "line one line two"
+        assert all(record.input_tokens is None for record in traces)
+
+    async def test_chat_structured_json_fallback_traces_each_validation_attempt(self, monkeypatch):
+        traces: list[LLMCallRecord] = []
+        gateway = LLMGateway(trace_sink=traces.append, structured_mode="json_fallback")
+        mock_client = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content='{"wrong": true}'))]
+        mock_response.usage = MagicMock(
+            prompt_tokens=4, completion_tokens=3, total_tokens=7
+        )
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+        gateway._clients = {"deepseek": mock_client}
+        gateway._get_available_providers = lambda: ["deepseek"]
+        gateway._get_model = lambda provider, task: "deepseek-chat"
+        monkeypatch.setattr("server.core.llm.settings.OUTLINES_ENABLED", True)
+
+        result = await gateway.chat_structured(
+            [{"role": "user", "content": "结构化测试"}],
+            schema=_StructuredResult,
+            task="analysis",
+            max_retries=1,
+        )
+
+        assert result.parsed is None
+        assert len(traces) == 2
+        assert all(record.structured_via == "chat" for record in traces)
+        assert all(record.success is True for record in traces)
+
+    async def test_provider_and_model_locks_disable_failover(self):
+        traces: list[LLMCallRecord] = []
+        gateway = LLMGateway(
+            trace_sink=traces.append,
+            provider_lock="locked-provider",
+            model_lock="locked-model",
+        )
+        fallback_client = AsyncMock()
+        gateway._clients = {"fallback": fallback_client}
+
+        result = await gateway.chat([], task="analysis", max_retries=0)
+
+        assert result.content == ""
+        fallback_client.chat.completions.create.assert_not_called()
