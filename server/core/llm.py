@@ -43,6 +43,15 @@ class StructuredLLMResponse(LLMResponse):
     via: str = "fallback"  # outlines | json_schema | fallback
 
 
+@dataclass(frozen=True)
+class LLMProcessingPlan:
+    """只读的当前模型处理计划，不触发网络请求。"""
+
+    provider: str
+    model: str
+    processing_mode: str  # local | remote | unavailable
+
+
 # ── 硬编码映射（仅作 fallback，优先级最低） ──
 
 _TASK_MODEL_FALLBACK: dict[str, dict[str, str]] = {
@@ -196,6 +205,17 @@ class LLMGateway:
         self._clients.clear()
         self._init_clients()
         logger.info("LLM 网关配置已重新加载，可用提供商: %s", list(self._clients.keys()))
+
+    def get_processing_plan(self, task: str = "analysis") -> LLMProcessingPlan:
+        """读取首选 provider/model，供隐私门禁使用；绝不发起模型调用。"""
+        remote = self._config.get("remote", {})
+        if remote.get("enabled"):
+            provider = str(remote.get("provider") or "remote")
+            return LLMProcessingPlan(provider, self._get_model(provider, task), "remote")
+        local = self._config.get("local", {})
+        if local.get("enabled"):
+            return LLMProcessingPlan("ollama", self._get_model("ollama", task), "local")
+        return LLMProcessingPlan("", "", "unavailable")
 
     # ── 模型选择（问题 2 修复：优先从配置文件读取模型名） ──
 

@@ -279,6 +279,7 @@ async def persist_analysis_result(
             processing_mode = getattr(result, "processing_mode", "local")
             if not isinstance(processing_mode, str) or not processing_mode:
                 processing_mode = "local"
+            storage_source = processing_mode if processing_mode in {"local", "remote"} else "local"
             worker_risks = getattr(result, "worker_risks", [])
             if not isinstance(worker_risks, list):
                 worker_risks = []
@@ -312,7 +313,7 @@ async def persist_analysis_result(
                         },
                         ensure_ascii=False,
                     ),
-                    source="local",
+                    source=storage_source,
                     status=analysis_status,
                     review_required=bool(review_reasons),
                     review_reason=json.dumps(
@@ -382,6 +383,7 @@ async def persist_analysis_result(
 async def analyze_contract(
     file: UploadFile = File(...),
     contract_type: str = Form(default=""),
+    allow_remote_processing: bool = Form(default=False),
     db: AsyncSession = Depends(get_db),
 ):
     """上传并分析合同（SSE 流式返回进度）"""
@@ -394,6 +396,13 @@ async def analyze_contract(
         raise HTTPException(
             status_code=400,
             detail="不支持的文件格式，请上传 PDF、办公文档（如 Word/Excel）或图片",
+        )
+
+    processing_plan = get_llm_gateway().get_processing_plan(task="analysis")
+    if processing_plan.processing_mode == "remote" and not allow_remote_processing:
+        raise HTTPException(
+            status_code=400,
+            detail="当前分析将把合同文本发送到已配置的远程模型服务。请确认后重新提交，或切换到本地 Ollama。",
         )
 
     # 保存文件

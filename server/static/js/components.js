@@ -99,6 +99,7 @@ const Components = (() => {
       <div class="upload-zone-icon">${Icons.upload(48)}</div>
       <div class="upload-zone-title">快速上传合同</div>
       <div class="upload-zone-hint">拖放文件到此处，或点击选择文件</div>
+      <label class="remote-consent"><input type="checkbox" id="allow-remote-processing"> 我理解合同文本可能发送至已配置的远程模型服务</label>
       <button class="btn btn-primary" style="margin-top:var(--sp-2)" onclick="document.getElementById('file-input').click()">选择文件</button>
       <input type="file" id="file-input" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.odt,.ods,.odp,.rtf,.epub,.csv,.png,.jpg,.jpeg,.bmp,.tiff,.tif,.webp" style="display:none" onchange="Components.handleFileUpload(this)">
     </div>`;
@@ -133,6 +134,7 @@ const Components = (() => {
       5: '生成报告',
     };
 
+    const consent = document.getElementById('allow-remote-processing');
     API.contracts.analyzeStream(file, {
       onProgress(step, total, message, substep) {
         const pct = Math.round((step / total) * 100);
@@ -156,7 +158,7 @@ const Components = (() => {
         toast('分析失败：' + message, 'error', 6000);
         if (uploadZone) uploadZone.innerHTML = originalContent;
       },
-    });
+    }, { allowRemoteProcessing: Boolean(consent && consent.checked) });
 
     // 重置 file input
     input.value = '';

@@ -101,6 +101,16 @@ class ContractAgent:
 
         result = AnalysisResult()
         contract_id = uuid.uuid4().hex
+        try:
+            plan_getter = getattr(self.llm, "get_processing_plan", None)
+            plan = plan_getter(task="analysis") if callable(plan_getter) else None
+            result.processing_mode = (
+                plan.processing_mode
+                if plan is not None and plan.processing_mode in {"local", "remote", "unavailable"}
+                else "unavailable"
+            )
+        except Exception:
+            result.processing_mode = "unavailable"
 
         def _pipeline_failure(message: str) -> AnalysisResult:
             result.contract_id = contract_id
@@ -559,7 +569,6 @@ class ContractAgent:
         result.red_count = eval_result.risk_distribution.get("red", 0)
         result.yellow_count = eval_result.risk_distribution.get("yellow", 0)
         result.green_count = eval_result.risk_distribution.get("green", 0)
-        result.processing_mode = "parallel"
         result.worker_risks = [asdict(r) for r in all_risks]
         result.review_reasons = {}
         if parse_failed:

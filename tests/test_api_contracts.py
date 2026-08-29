@@ -171,6 +171,27 @@ class TestAnalyzeContract:
         assert response.status_code == 400
         assert "不支持的文件格式" in response.json()["detail"]
 
+    async def test_remote_analysis_requires_consent_before_persisting_upload(self, contracts_client, db_session, tmp_path):
+        from server.core.llm import LLMProcessingPlan
+
+        with patch(
+            "server.api.contracts.get_llm_gateway",
+            return_value=SimpleNamespace(
+                get_processing_plan=lambda task: LLMProcessingPlan(
+                    "deepseek", "deepseek-chat", "remote"
+                )
+            ),
+        ):
+            response = await contracts_client.post(
+                "/api/contracts/analyze",
+                files={"file": ("private.pdf", b"private contract", "application/pdf")},
+            )
+        assert response.status_code == 400
+        assert "远程模型服务" in response.json()["detail"]
+        assert (await db_session.execute(
+            select(Contract).where(Contract.title == "private")
+        )).scalars().all() == []
+
     async def test_analyze_docx_accepted(self, contracts_client, db_session):
         """测试 .docx 不再因格式被拒（mock Agent）"""
         mock_result = MagicMock()
@@ -207,7 +228,7 @@ class TestAnalyzeContract:
                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     )
                 },
-                data={"contract_type": "租赁合同"},
+                data={"contract_type": "租赁合同", "allow_remote_processing": "true"},
             )
             # 关键：扩展名白名单放行，不再 400「不支持的文件格式」
             assert response.status_code == 200
@@ -265,7 +286,7 @@ class TestAnalyzeContract:
             response = await contracts_client.post(
                 "/api/contracts/analyze",
                 files={"file": ("test.pdf", b"fake pdf content", "application/pdf")},
-                data={"contract_type": "租赁合同"},
+                data={"contract_type": "租赁合同", "allow_remote_processing": "true"},
             )
             assert response.status_code == 200
             # SSE 流：至少推送了 result 事件
@@ -316,7 +337,7 @@ class TestPersistAnalysisResult:
             ],
             analysis_status="completed",
             review_reasons={},
-            processing_mode="parallel",
+            processing_mode="remote",
             worker_risks=[{
                 "clause_id": "第一条",
                 "dimension": "financial",
@@ -347,6 +368,8 @@ class TestPersistAnalysisResult:
         assert analysis.contract_id == "persist_contract"
         assert analysis.overall_score == 55
         assert analysis.recommendation == "negotiate_first"
+        assert analysis.processing_mode == "remote"
+        assert analysis.source == "remote"
         assert "mem_session_1" in (analysis.raw_result or "")
 
         clauses = (

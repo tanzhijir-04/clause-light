@@ -56,9 +56,12 @@ const API = (() => {
      * @param {File} file - 要上传的文件
      * @param {object} callbacks - { onProgress(step, total, message, substep), onResult(data), onError(message) }
      */
-    analyzeStream(file, callbacks = {}) {
+    analyzeStream(file, callbacks = {}, options = {}) {
       const form = new FormData();
       form.append('file', file);
+      if (options.allowRemoteProcessing === true) {
+        form.append('allow_remote_processing', 'true');
+      }
       const ctrl = new AbortController();
 
       fetch('/api/contracts/analyze', {

@@ -119,6 +119,23 @@ class TestLLMGatewayInit:
                 gateway = LLMGateway()
                 assert "ollama" in gateway._clients
 
+    def test_processing_plan_distinguishes_remote_and_local_without_network(self):
+        gateway = LLMGateway.__new__(LLMGateway)
+        gateway._clients = {}
+        gateway._structured_unsupported = set()
+        gateway._config = {
+            "remote": {"enabled": True, "provider": "deepseek", "models": {"analyze": "deepseek-chat"}},
+            "local": {"enabled": True, "models": {"analyze": "qwen2.5:7b"}},
+        }
+        remote = gateway.get_processing_plan()
+        assert remote.processing_mode == "remote"
+        assert remote.provider == "deepseek"
+
+        gateway._config["remote"]["enabled"] = False
+        local = gateway.get_processing_plan()
+        assert local.processing_mode == "local"
+        assert local.provider == "ollama"
+
 
 class TestLLMGatewayChat:
     """LLM 网关 chat 方法测试"""
