@@ -15,6 +15,7 @@ from server.core.workers.evaluator import EvaluationResult
 from server.core.workers.parser import (
     TYPE_TO_WORKERS,
     ClauseItem,
+    _parse_single_chunk,
     normalize_contract_text,
     parse_contract,
 )
@@ -168,6 +169,125 @@ async def test_parse_failure_returns_complete_normalized_full_text_fallback(
         0,
         len(normalized),
     )
+
+
+@pytest.mark.asyncio
+async def test_parse_single_chunk_json_failure_returns_concrete_fallback_reason() -> None:
+    llm = MagicMock()
+    llm.chat_structured = AsyncMock(
+        return_value=StructuredLLMResponse(content="{not-json", parsed=None)
+    )
+    llm.parse_json = MagicMock(side_effect=ValueError("invalid JSON payload"))
+
+    result = await _parse_single_chunk("合同正文", llm)
+
+    assert result.parse_failed is True
+    assert result.parse_status == "fallback"
+    assert result.review_required is True
+    assert result.fallback_reason == "JSON 解析失败: invalid JSON payload"
+    assert result.failure_reason == result.fallback_reason
+    assert result.clauses == []
+
+
+@pytest.mark.asyncio
+async def test_parse_single_chunk_non_object_json_returns_concrete_fallback_reason() -> None:
+    llm = MagicMock()
+    llm.chat_structured = AsyncMock(
+        return_value=StructuredLLMResponse(content="[]", parsed=None)
+    )
+    llm.parse_json = MagicMock(return_value=["not", "an", "object"])
+
+    result = await _parse_single_chunk("合同正文", llm)
+
+    assert result.parse_failed is True
+    assert result.parse_status == "fallback"
+    assert result.review_required is True
+    assert result.fallback_reason == "JSON 根对象不是解析结果"
+    assert result.failure_reason == result.fallback_reason
+    assert result.clauses == []
+
+
+@pytest.mark.asyncio
+async def test_parse_single_chunk_schema_failure_returns_concrete_fallback_reason() -> None:
+    llm = MagicMock()
+    llm.chat_structured = AsyncMock(
+        return_value=StructuredLLMResponse(content="{}", parsed=None)
+    )
+    llm.parse_json = MagicMock(
+        return_value={
+            "contract_type": "租赁合同",
+            "clauses": [{"id": "1", "text": ""}],
+        }
+    )
+
+    result = await _parse_single_chunk("合同正文", llm)
+
+    assert result.parse_failed is True
+    assert result.parse_status == "fallback"
+    assert result.review_required is True
+    assert result.fallback_reason.startswith("Schema 校验失败: ")
+    assert len(result.fallback_reason) > len("Schema 校验失败: ")
+    assert "clauses" in result.fallback_reason
+    assert result.failure_reason == result.fallback_reason
+    assert result.clauses == []
+
+
+@pytest.mark.asyncio
+async def test_parse_contract_marks_partial_when_later_chunk_json_parsing_fails() -> None:
+    llm = MagicMock()
+    llm.chat_structured = AsyncMock(
+        side_effect=[
+            _structured_result(
+                ParseClauseSchema(
+                    id="1", type="payment", title="付款", text="付款条款"
+                )
+            ),
+            StructuredLLMResponse(content="{not-json", parsed=None),
+        ]
+    )
+    llm.parse_json = MagicMock(side_effect=ValueError("invalid later chunk"))
+
+    with patch(
+        "server.core.workers.parser._chunk_text",
+        return_value=["前段 付款条款", "后段 无法解析"],
+    ):
+        result = await parse_contract("前段 付款条款 后段 无法解析", llm)
+
+    assert result.parse_status == "partial"
+    assert result.parse_failed is True
+    assert result.failure_reason == "JSON 解析失败: invalid later chunk"
+    assert result.review_required is True
+    assert len(result.clauses) == 1
+    assert result.clauses[0].text == "付款条款"
+
+
+@pytest.mark.asyncio
+async def test_clause_location_falls_back_to_first_30_chars_without_review() -> None:
+    clause_text = (
+        "合同付款条件为签订后支付首期款项，余款应在验收完成后结清，"
+        "逾期付款需承担违约责任。"
+    )
+    prefix = clause_text[:30]
+    full_text = f"前言。{prefix}但原文的后续表述不同。"
+    llm = MagicMock()
+    llm.chat_structured = AsyncMock(
+        return_value=_structured_result(
+            ParseClauseSchema(id="1", type="payment", title="付款", text=clause_text)
+        )
+    )
+
+    result = await parse_contract(full_text, llm)
+
+    normalized = normalize_contract_text(full_text)
+    clause = result.clauses[0]
+    start = normalized.index(prefix)
+    assert len(clause_text) > 30
+    assert normalized.find(clause_text) == -1
+    assert (clause.source_start, clause.source_end) == (start, start + 30)
+    assert normalized[clause.source_start : clause.source_end] == prefix
+    assert clause.review_required is False
+    assert clause.review_reason == ""
+    assert result.review_required is False
 
 
 @pytest.mark.asyncio
