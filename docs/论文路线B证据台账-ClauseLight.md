@@ -188,3 +188,21 @@ git diff --check                         # TEST-FORMAT-001
 - `TEST-E2E-001`（TEST）：启动本地服务后执行 `python tests/e2e_quick.py`：11 passed / 0 failed；覆盖仪表盘、合同列表、详情、原文标注、知识库、同步管理、模型管理和设置页，脚本失败会返回非零。
 - `TEST-SCREENSHOT-001`（TEST）：演示数据库 API 快照为合同 10、规则 48、法条 43、平均分 30.7、风险条款 red/yellow/green=45/29/18；据此生成并替换 `tests/screenshots/01_homepage.png`。截图人工检查仅见合成测试合同名，未见手机号、证件号、地址或 API Key；设置页的 API Key 为掩码。该截图是界面证据，不是法律判断证据。
 - `TEST-COVERAGE-001`（TEST）：按计划覆盖率命令在仓库默认 `pytest.ini` 全 `server` 分母下为 56.43%，取消默认 addopts 并限定路线 B 指定模块后为 72.49%，均未达到 80% 门禁；原因主要是 `server/api/contracts.py` 未覆盖上传/详情分支。全量 `pytest -q` 仍为 313 passed、2 skipped、8 warnings，不能把未达覆盖率写成通过。
+
+## Task 14 最终可复现性审计
+
+| 审计项 | 状态 | 证据/限制 |
+|---|---|---|
+| 安全状态：失败不转绿色 | PASS | `unknown`、失败状态、复核原因及前端独立展示均有测试 |
+| 追溯链：原文位置与 Worker 历史 | PASS | source 坐标、initial/resolution 轨迹和 API 详情均已覆盖 |
+| 法规来源与引用校验 | PASS | `LAW-SOURCE-001/002`；伪造 citation ID 转为复核 |
+| 远程隐私同意 | PASS | 未勾选同意时在读取上传内容前拒绝远程分析 |
+| 旧数据库迁移 | PASS | 临时旧表副本完成新增字段、Worker 表创建和二次幂等迁移；旧 status 回填为 disabled |
+| 核心测试 | PASS | 最新核心命令 146 passed、2 warnings |
+| 全量测试 | PASS | `pytest -q`：313 passed、2 skipped、8 warnings |
+| E2E | PASS | `tests/e2e_quick.py`：11 passed、0 failed |
+| 正式实验可重建 | FAIL / 未运行 | 没有六独立组私有 manifest、远程价格快照和已授权模型额度；不能伪造 90 个 RUN 或实验报告数字 |
+| 论文数字可追溯 | PASS（已声明边界） | 论文测试/演示数字指向台账；正式实验数字明确写为尚未产生 |
+| 敏感信息扫描 | PASS（投稿范围） | 投稿论文、首页截图和 Route B raw 约束未发现真实密钥或个人信息；其他历史设计文档中的 `sk-xxx`/字段示例不是运行密钥，不纳入投稿证据 |
+
+最终停止条件：路线 B 的工程实现和离线验证已完成，但“正式 6×3×5 实验”“路线指定覆盖率 80%”和作者确认元数据仍未满足。因此本仓库不能写“路线 B 完成，可直接投稿”；后续需由授权操作者提供私有 manifest、模型/费用确认和作者信息后再继续。
