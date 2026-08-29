@@ -5,7 +5,7 @@
 ## 不可变基线（2026-08-29）
 
 - 执行日期：`2026-08-29`
-- 仓库：`C:\Users\20300\Desktop\clause-light`
+- 仓库：`<repository-root>`（提交文档不记录绝对工作站路径）
 - `git rev-parse HEAD`：`769e9b43e53d352bb7df0d4903028d10bc19d462`
 - `git status --short`：
 
@@ -43,9 +43,69 @@
 
 `sample_id`, `input_path`, `contract_type`, `source_kind`, `authorization_note`, `independent_group`, `contains_personal_data`
 
-`contract_type` 只能为 `rental`、`labor`、`service`；`source_kind` 只能为 `txt`、`pdf`、`image`。最小比较样本为 6 个独立文本：租赁、劳动、服务各 2 个。同一独立文本的 PDF/TXT/图片变体必须使用相同 `independent_group`，并且只计数一次。未达到该规则时，实验只能标记为 development-only，不得作跨类型比较结论。
+`contract_type` 只能为 `rental`、`labor`、`service`；`source_kind` 只能为 `authorized`（合成/演示占位）或 `txt`、`pdf`、`image`。最小比较样本为 6 个独立文本：租赁、劳动、服务各 2 个。同一独立文本的 PDF/TXT/图片变体必须使用相同 `independent_group`，并且只计数一次。未达到该规则时，实验只能标记为 development-only，不得作跨类型比较结论。
 
-仅允许使用已获授权处理的私有数据；`authorization_note` 必须能说明授权依据。真实合同、个人信息、API key、含合同正文或个人信息的 raw output 均禁止提交到仓库。私有数据应放在仓库外或由忽略规则保护的位置；聚合 Markdown 不得回填合同正文。
+仅允许使用已获授权处理的私有数据；`authorization_note` 必须非空并能说明授权依据，`input_path` 必须指向仓库外的私有路径。真实合同、个人信息、API key、含合同正文或个人信息的 raw output 均禁止提交到仓库。私有数据应放在仓库外或由忽略规则保护的位置；聚合 Markdown 不得回填合同正文。
+
+### Manifest 标准库校验
+
+从仓库根目录执行以下命令。它逐行解析 JSONL，严格检查 7 个字段、允许的合同类型/来源类型、`contains_personal_data` 的严格布尔类型、授权说明和仓库外路径，并在 `--require-comparison-set` 下强制 6 个独立组及每类 2 组；任一错误均以非零状态退出。PDF/TXT/图片变体共用 `independent_group`，只计一个独立文本。
+
+```powershell
+@'
+import json
+import sys
+from collections import Counter
+from pathlib import Path
+
+path = Path(sys.argv[1])
+require_comparison_set = len(sys.argv) == 3 and sys.argv[2] == "--require-comparison-set"
+fields = {"sample_id", "input_path", "contract_type", "source_kind", "authorization_note", "independent_group", "contains_personal_data"}
+contract_types = {"rental", "labor", "service"}
+source_kinds = {"authorized", "txt", "pdf", "image"}
+repo_root = Path.cwd().resolve()
+groups = {}
+with path.open(encoding="utf-8") as handle:
+    for line_number, raw in enumerate(handle, 1):
+        if not raw.strip():
+            raise SystemExit(f"line {line_number}: blank lines are not allowed")
+        try:
+            record = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise SystemExit(f"line {line_number}: invalid JSON: {exc}")
+        if not isinstance(record, dict) or set(record) != fields:
+            raise SystemExit(f"line {line_number}: fields must be exactly {sorted(fields)}")
+        if record["contract_type"] not in contract_types:
+            raise SystemExit(f"line {line_number}: invalid contract_type")
+        if record["source_kind"] not in source_kinds:
+            raise SystemExit(f"line {line_number}: invalid source_kind")
+        if not isinstance(record["input_path"], str) or not record["input_path"].strip():
+            raise SystemExit(f"line {line_number}: input_path must be non-empty")
+        if not isinstance(record["authorization_note"], str) or not record["authorization_note"].strip():
+            raise SystemExit(f"line {line_number}: authorization_note is required")
+        if not isinstance(record["independent_group"], str) or not record["independent_group"].strip():
+            raise SystemExit(f"line {line_number}: independent_group must be non-empty")
+        if type(record["contains_personal_data"]) is not bool:
+            raise SystemExit(f"line {line_number}: contains_personal_data must be boolean")
+        input_path = record["input_path"]
+        if not input_path.startswith("<private-input-path>"):
+            candidate = Path(input_path).expanduser()
+            resolved = candidate.resolve() if candidate.is_absolute() else (repo_root / candidate).resolve()
+            if resolved == repo_root or repo_root in resolved.parents:
+                raise SystemExit(f"line {line_number}: input_path must be outside the repository")
+        group = record["independent_group"]
+        previous_type = groups.setdefault(group, record["contract_type"])
+        if previous_type != record["contract_type"]:
+            raise SystemExit(f"line {line_number}: independent_group mixes contract types")
+if require_comparison_set:
+    counts = Counter(groups.values())
+    if len(groups) < 6 or any(counts[item] < 2 for item in contract_types):
+        raise SystemExit("requires 6 independent groups: 2 rental, 2 labor, 2 service")
+print(f"valid: {path} ({len(groups)} independent groups)")
+'@ | python - experiments/data/manifest.local.jsonl --require-comparison-set
+```
+
+对示例 manifest 去掉 `--require-comparison-set` 可验证其单行 schema；它只有一个独立组，所以只能标记 development-only。
 
 ## 当前证据登记
 
@@ -55,11 +115,11 @@
 | `TEST-BASELINE-001` | TEST | `pytest`：255 collected，253 passed，2 skipped，23 warnings，exit 0 | 仅证明仓库测试通过，不证明法律准确率 |
 | `CODE-CONFIG-001` | CODE | `experiments/contract_pipeline/config.json` 的冻结运行参数 | provider/model lock 为空；不得混用有效配置 |
 | `CODE-MANIFEST-001` | CODE | 私有 manifest 的严格字段和 6 文本最低样本规则 | 不满足时仅 development-only |
-| `TEST-FORMAT-001` | TEST | 计划执行 JSON 校验与 `git diff --check` | 待本任务完成后登记实际输出 |
+| `TEST-FORMAT-001` | TEST | 已执行 `python -m json.tool experiments/contract_pipeline/config.json`、逐行 JSONL/schema 校验及 `git diff --check` | 2026-08-29：全部通过；示例 manifest 为 1 个独立组，按规则仅 development-only |
 | `RUN-<date>-<id>` | RUN | 脱敏实验聚合结果、配置摘要和样本计数 | 每次运行追加真实 ID；不得包含合同正文/个人信息 |
 | `HUMAN-<id>` | HUMAN | 未来法律专家 gold label 或独立复核 | 当前不存在；法律准确率未评估 |
 
-## 计划验证命令
+## 已执行与后续验证命令
 
 从仓库根目录执行并把实际结果关联到证据 ID：
 
@@ -69,10 +129,10 @@ git rev-parse HEAD                      # CODE-BASELINE-001
 git status --short                      # CODE-BASELINE-001
 pytest                                  # TEST-BASELINE-001
 python -m json.tool experiments/contract_pipeline/config.json  # TEST-FORMAT-001
-python -c "import json; json.loads(open('experiments/contract_pipeline/manifest.example.jsonl', encoding='utf-8').readline())"  # TEST-FORMAT-001
+python -c "import json; json.loads(open('experiments/contract_pipeline/manifest.example.jsonl', encoding='utf-8').readline())"  # TEST-FORMAT-001：逐行/schema 校验已通过
 git diff --check                         # TEST-FORMAT-001
 ```
 
 ## 隐私与声明禁令
 
-本项目禁止提交真实合同、API keys、含合同文本或个人信息的 raw outputs；禁止通过 Git 历史、示例文件、聚合结果或日志间接泄露这些内容。除非存在可复核的 HUMAN 证据，禁止声称法律 accuracy、recall、F1、lawyer agreement 或 superiority over humans。`pricing: null` 也不支持零成本或成本优势结论；远程 provider 的价格结论必须引用官方价格快照及其证据 ID。
+本项目禁止提交真实合同、API keys、含合同文本或个人信息的 raw outputs；禁止通过 Git 历史、示例文件、聚合结果或日志间接泄露这些内容。除非存在可复核的 HUMAN 证据，禁止声称法律 accuracy、recall、F1、lawyer agreement 或 superiority over humans。正式远程运行必须在任何模型调用前拒绝执行，除非独立运行元数据中的 pricing 是完整对象，包含 `currency`、`input_per_million`、`output_per_million`、官方 `source_url`、`verified_at`，并有与锁定 provider/model 匹配的证据。`config.json` 仍是冻结基线；远程价格只能写入单独的已验证运行元数据/快照，不得静默改变基线。`pricing: null` 对本地推理仍表示不估算成本，不支持零成本或成本优势结论。

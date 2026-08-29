@@ -1,1 +1,1 @@
-{"sample_id":"<sample-id>","input_path":"<private-path-outside-repository>","contract_type":"<rental|labor|service>","source_kind":"<txt|pdf|image>","authorization_note":"<authorized-private-data-only>","independent_group":"<independent-text-id>","contains_personal_data":false}
+{"sample_id":"demo-rental-01","input_path":"<private-input-path>/demo-rental-01.txt","contract_type":"rental","source_kind":"authorized","authorization_note":"placeholder-authorized-demo-only","independent_group":"demo-rental-01","contains_personal_data":false}
