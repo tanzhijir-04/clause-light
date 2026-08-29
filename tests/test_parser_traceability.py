@@ -211,6 +211,45 @@ async def test_parse_failure_returns_complete_normalized_full_text_fallback(
 
 
 @pytest.mark.asyncio
+async def test_agent_exception_fallback_uses_utf16_full_text_offsets() -> None:
+    full_text = "合同😀正文\n付款条款。"
+    normalized = normalize_contract_text(full_text)
+
+    with (
+        patch("server.core.agent.document_ingress.ingest", new_callable=AsyncMock) as ingest,
+        patch("server.core.agent.parse_contract", new_callable=AsyncMock) as parse,
+        patch("server.core.agent.analyze_dimension", new_callable=AsyncMock) as analyze,
+        patch("server.core.agent.evaluate", new_callable=AsyncMock) as evaluate,
+        patch("server.core.agent.async_session_factory") as session_factory,
+        patch.object(ContractAgent, "_trigger_distill", new=AsyncMock()),
+    ):
+        ingest.return_value = DocumentResult(
+            full_text=full_text,
+            markdown=full_text,
+            source="test",
+            confidence_avg=1.0,
+        )
+        parse.side_effect = RuntimeError("解析失败")
+        analyze.return_value = []
+        evaluate.return_value = EvaluationResult(
+            overall_score=None,
+            risk_distribution={"red": 0, "yellow": 0, "green": 0, "unknown": 1},
+            recommendation="manual_review",
+            one_line_summary="系统未形成可用评级，请人工复核",
+            needs_review=["1"],
+        )
+        _configure_session(session_factory)
+
+        result = await ContractAgent(llm=MagicMock()).analyze("test.txt")
+
+    clause = result.clauses[0]
+    assert clause["content"] == normalized
+    assert clause["source_start"] == 0
+    assert clause["source_end"] == len(normalized.encode("utf-16-le")) // 2
+    assert clause["source_end"] > len(normalized)
+
+
+@pytest.mark.asyncio
 async def test_parse_single_chunk_json_failure_returns_concrete_fallback_reason() -> None:
     llm = MagicMock()
     llm.chat_structured = AsyncMock(

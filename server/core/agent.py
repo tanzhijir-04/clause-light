@@ -24,6 +24,7 @@ from server.core.workers.parser import (
     TYPE_TO_WORKERS,
     ClauseItem,
     ParseResult,
+    _utf16_length,
     parse_contract,
     normalize_contract_text,
 )
@@ -145,7 +146,7 @@ class ContractAgent:
                     id="1", type="other", title="全文",
                     text=normalize_contract_text(full_text), relevance=["general"],
                     source_start=0,
-                    source_end=len(normalize_contract_text(full_text)),
+                    source_end=_utf16_length(normalize_contract_text(full_text)),
                     review_required=True,
                     review_reason=str(e),
                 )],
