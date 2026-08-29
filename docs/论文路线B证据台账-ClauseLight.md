@@ -179,3 +179,9 @@ git diff --check                         # TEST-FORMAT-001
 ## 隐私与声明禁令
 
 本项目禁止提交真实合同、API keys、含合同文本或个人信息的 raw outputs；禁止通过 Git 历史、示例文件、聚合结果或日志间接泄露这些内容。除非存在可复核的 HUMAN 证据，禁止声称法律 accuracy、recall、F1、lawyer agreement 或 superiority over humans。Task 1 只记录硬远程定价门禁，不包含可执行 runner，也不声称本 commit 已经执行该门禁；Task 10 的可执行 runner 必须在任何模型调用前拒绝执行，除非独立运行元数据中的 pricing 是完整对象，包含 `currency`、`input_per_million`、`output_per_million`、官方 `source_url`、`verified_at`，并有与锁定 provider/model 匹配的证据。`config.json` 仍是冻结基线；远程价格只能写入单独的已验证运行元数据/快照，不得静默改变基线。`pricing: null` 对本地推理仍表示不估算成本，不支持零成本或成本优势结论。
+
+## Task 11 离线失败注入与报告实现记录
+
+- `TEST-FAILURE-001`（TEST）：`pytest tests/test_experiment_failure_injection.py tests/test_experiment_report.py -q`：5 passed。对 Worker 空响应、非法 JSON、维度异常和伪造 citation ID 共 4 个组件级注入场景均转换为 `unknown` 或可复核状态；这只是失败状态捕获测试，不是法律准确率。
+- `CODE-REPORT-001`（CODE/TEST）：`experiments/contract_pipeline/report.py` 固定汇总调用、Token 覆盖率、延迟、费用可计算性、风险/复核/失败状态和重复稳定性；`test_report_is_deterministic_and_states_accuracy_boundary` 验证相同输入产生相同报告，并保留“未建立专家标注，不评价法律判断正确性”边界。
+- `TEST-PREFLIGHT-001`（TEST）：使用提交的单样本 example manifest 执行 Route B runner `--check-only`，按预期以 exit code 2 拒绝六独立组门禁；未发起模型调用。当前没有私有授权 manifest、官方价格快照或可授权的正式模型运行，因此不登记 RUN 结果，不伪造 6×3×5 数字。
