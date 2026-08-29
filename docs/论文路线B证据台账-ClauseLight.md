@@ -185,3 +185,6 @@ git diff --check                         # TEST-FORMAT-001
 - `TEST-FAILURE-001`（TEST）：`pytest tests/test_experiment_failure_injection.py tests/test_experiment_report.py -q`：5 passed。对 Worker 空响应、非法 JSON、维度异常和伪造 citation ID 共 4 个组件级注入场景均转换为 `unknown` 或可复核状态；这只是失败状态捕获测试，不是法律准确率。
 - `CODE-REPORT-001`（CODE/TEST）：`experiments/contract_pipeline/report.py` 固定汇总调用、Token 覆盖率、延迟、费用可计算性、风险/复核/失败状态和重复稳定性；`test_report_is_deterministic_and_states_accuracy_boundary` 验证相同输入产生相同报告，并保留“未建立专家标注，不评价法律判断正确性”边界。
 - `TEST-PREFLIGHT-001`（TEST）：使用提交的单样本 example manifest 执行 Route B runner `--check-only`，按预期以 exit code 2 拒绝六独立组门禁；未发起模型调用。当前没有私有授权 manifest、官方价格快照或可授权的正式模型运行，因此不登记 RUN 结果，不伪造 6×3×5 数字。
+- `TEST-E2E-001`（TEST）：启动本地服务后执行 `python tests/e2e_quick.py`：11 passed / 0 failed；覆盖仪表盘、合同列表、详情、原文标注、知识库、同步管理、模型管理和设置页，脚本失败会返回非零。
+- `TEST-SCREENSHOT-001`（TEST）：演示数据库 API 快照为合同 10、规则 48、法条 43、平均分 30.7、风险条款 red/yellow/green=45/29/18；据此生成并替换 `tests/screenshots/01_homepage.png`。截图人工检查仅见合成测试合同名，未见手机号、证件号、地址或 API Key；设置页的 API Key 为掩码。该截图是界面证据，不是法律判断证据。
+- `TEST-COVERAGE-001`（TEST）：按计划覆盖率命令在仓库默认 `pytest.ini` 全 `server` 分母下为 56.43%，取消默认 addopts 并限定路线 B 指定模块后为 72.49%，均未达到 80% 门禁；原因主要是 `server/api/contracts.py` 未覆盖上传/详情分支。全量 `pytest -q` 仍为 313 passed、2 skipped、8 warnings，不能把未达覆盖率写成通过。
