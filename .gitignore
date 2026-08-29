@@ -38,6 +38,12 @@ htmlcov/
 .coverage
 .coverage.*
 
+# 路线 B 实验私有数据与原始结果
+experiments/data/
+experiments/results/raw/
+experiments/results/*.jsonl
+experiments/results/*.csv
+
 软件著作权申请资料/
 
 # Node

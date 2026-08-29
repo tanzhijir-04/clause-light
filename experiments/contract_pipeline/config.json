@@ -1,0 +1,16 @@
+{
+  "modes": [
+    "single_pass",
+    "serial_multi_stage",
+    "parallel_multi_stage"
+  ],
+  "runs_per_sample": 5,
+  "temperature": 0.1,
+  "max_retries": 0,
+  "provider_lock": "",
+  "model_lock": "",
+  "structured_mode": "json_fallback",
+  "timeout_seconds": 600,
+  "store_contract_text": false,
+  "pricing": null
+}
