@@ -114,6 +114,45 @@ async def test_clause_location_uses_normalized_text_coordinates() -> None:
 
 
 @pytest.mark.asyncio
+async def test_clause_locations_use_utf16_offsets_after_astral_prefix() -> None:
+    clause_text = (
+        "合同付款条件为签订后支付首期款项，余款应在验收完成后结清，"
+        "逾期付款需承担违约责任。"
+    )
+    prefix = clause_text[:30]
+    prefix_utf16_end = len((f"前言😀。{prefix}").encode("utf-16-le")) // 2
+    clause_start_utf16 = len("前言😀。".encode("utf-16-le")) // 2
+
+    full_match_llm = MagicMock()
+    full_match_llm.chat_structured = AsyncMock(
+        return_value=_structured_result(
+            ParseClauseSchema(id="1", type="payment", title="付款", text=clause_text)
+        )
+    )
+    full_match_result = await parse_contract(f"前言😀。{clause_text}", full_match_llm)
+
+    assert (full_match_result.clauses[0].source_start, full_match_result.clauses[0].source_end) == (
+        clause_start_utf16,
+        clause_start_utf16 + len(clause_text),
+    )
+
+    fallback_llm = MagicMock()
+    fallback_llm.chat_structured = AsyncMock(
+        return_value=_structured_result(
+            ParseClauseSchema(id="1", type="payment", title="付款", text=clause_text)
+        )
+    )
+    fallback_result = await parse_contract(
+        f"前言😀。{prefix}但原文的后续表述不同。", fallback_llm
+    )
+
+    assert (fallback_result.clauses[0].source_start, fallback_result.clauses[0].source_end) == (
+        clause_start_utf16,
+        prefix_utf16_end,
+    )
+
+
+@pytest.mark.asyncio
 async def test_rewritten_clause_without_match_requires_review_and_has_no_range() -> None:
     llm = MagicMock()
     llm.chat_structured = AsyncMock(

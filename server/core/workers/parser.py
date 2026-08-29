@@ -72,6 +72,11 @@ def normalize_contract_text(text: str) -> str:
     return normalized.strip()
 
 
+def _utf16_length(text: str) -> int:
+    """Return the JavaScript-compatible UTF-16 code-unit length."""
+    return len(text.encode("utf-16-le")) // 2
+
+
 # ── 数据结构 ──
 
 @dataclass
@@ -184,7 +189,7 @@ def _fallback_parse_result(
         text=normalized_text,
         relevance=["general"],
         source_start=0,
-        source_end=len(normalized_text),
+        source_end=_utf16_length(normalized_text),
         review_required=True,
         review_reason=reason,
     )
@@ -221,9 +226,10 @@ def _apply_source_locations(clauses: list[ClauseItem], source_text: str) -> bool
             review_required = True
             continue
 
-        clause.source_start = start
-        clause.source_end = start + match_length
-        cursor = clause.source_end
+        match_end = start + match_length
+        clause.source_start = _utf16_length(source_text[:start])
+        clause.source_end = _utf16_length(source_text[:match_end])
+        cursor = match_end
         review_required = review_required or clause.review_required
 
     return review_required
