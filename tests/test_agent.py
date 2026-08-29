@@ -120,7 +120,7 @@ class TestContractAgent:
         mock_ingest.return_value = _make_doc_result("")
 
         result = await self.agent.analyze(file_path="test.pdf")
-        assert result.contract_id == ""
+        assert result.contract_id
         assert "为空" in result.error
         assert result.analysis_status == "failed"
         assert result.recommendation == "manual_review"
@@ -241,7 +241,7 @@ class TestContractAgent:
         mock_ingest.side_effect = Exception("解析崩溃")
 
         result = await self.agent.analyze(file_path="test.pdf")
-        assert result.contract_id == ""
+        assert result.contract_id
         assert "文档解析失败" in result.error
         assert result.analysis_status == "failed"
         assert result.recommendation == "manual_review"

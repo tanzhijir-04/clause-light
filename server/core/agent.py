@@ -89,8 +89,12 @@ class ContractAgent:
         file_path: str,
         contract_type_hint: str | None = None,
         on_step: Callable | None = None,
+        worker_mode: str = "parallel",
     ) -> AnalysisResult:
         """完整的三段式分析流程"""
+
+        if worker_mode not in {"parallel", "serial"}:
+            raise ValueError("worker_mode 必须是 parallel 或 serial")
 
         async def _notify(step: int, total: int, message: str) -> None:
             if on_step:
@@ -316,8 +320,9 @@ class ContractAgent:
                 parse_result.review_required = True
 
         total_workers = len(DIMENSIONS)
-        await _notify(3, 5, f"正在并行分析 {total_workers} 个维度...")
-        logger.info("Stage 2: 并行风险评估 (%d 个 Worker)", total_workers)
+        mode_label = "并行" if worker_mode == "parallel" else "串行"
+        await _notify(3, 5, f"正在{mode_label}分析 {total_workers} 个维度...")
+        logger.info("Stage 2: %s风险评估 (%d 个 Worker)", mode_label, total_workers)
 
         worker_tasks = [
             analyze_dimension(
@@ -331,7 +336,15 @@ class ContractAgent:
             )
             for dim in DIMENSIONS
         ]
-        worker_results = await asyncio.gather(*worker_tasks, return_exceptions=True)
+        if worker_mode == "serial":
+            worker_results = []
+            for task in worker_tasks:
+                try:
+                    worker_results.append(await task)
+                except Exception as exc:
+                    worker_results.append(exc)
+        else:
+            worker_results = await asyncio.gather(*worker_tasks, return_exceptions=True)
 
         # 合并所有 Worker 结果，同时丢弃不属于本维度请求的条款 id。
         all_risks: list[ClauseRisk] = []
