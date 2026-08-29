@@ -437,6 +437,47 @@ class TestContractAgent:
         assert result.error
         assert result.review_reasons["pipeline"]
 
+    @patch("server.core.agent.evaluate")
+    @patch("server.core.agent.analyze_dimension")
+    @patch("server.core.agent.parse_contract")
+    @patch("server.core.agent.async_session_factory")
+    @patch("server.core.agent.document_ingress.ingest", new_callable=AsyncMock)
+    async def test_parse_review_required_with_usable_worker_result_is_partial(
+        self, mock_ingest, mock_factory, mock_parse, mock_dimension, mock_evaluate
+    ):
+        mock_ingest.return_value = _make_doc_result("合同内容")
+        parse_result = _mock_parse_result(
+            clauses=[
+                ClauseItem(
+                    id="1",
+                    type="payment",
+                    title="付款",
+                    text="验收后付款",
+                    relevance=["financial"],
+                )
+            ]
+        )
+        parse_result.review_required = True
+        parse_result.fallback_reason = "解析结果需要人工确认"
+        mock_parse.return_value = parse_result
+
+        async def _fake_dimension(
+            dim, clauses, llm, contract_type, kb_rules=None, kb_laws=None, memory_context=""
+        ):
+            if dim == "financial":
+                return [ClauseRisk(clause_id="1", risk_level="green", severity=1)]
+            return []
+
+        mock_dimension.side_effect = _fake_dimension
+        mock_evaluate.return_value = _mock_eval_result()
+        _configure_session(mock_factory)
+
+        result = await self.agent.analyze(file_path="test.pdf")
+
+        assert result.analysis_status == "partial"
+        assert result.analysis_status != "completed"
+        assert "解析结果需要人工确认" in result.review_reasons["pipeline"]
+
     @patch("server.core.agent.analyze_dimension_with_context")
     @patch("server.core.agent.evaluate")
     @patch("server.core.agent.analyze_dimension")

@@ -506,6 +506,12 @@ class ContractAgent:
             result.review_reasons["pipeline"] = [
                 parse_failure_reason or "合同结构解析失败"
             ]
+        elif parse_result.review_required:
+            result.review_reasons["pipeline"] = [
+                parse_result.fallback_reason
+                or parse_result.failure_reason
+                or "合同结构解析需要人工复核"
+            ]
         for clause in parse_result.clauses:
             if clause.review_required:
                 result.needs_review.append(clause.id)
@@ -525,7 +531,9 @@ class ContractAgent:
         ]
         has_risk_failure = any(
             risk not in usable_risks or risk.review_required for risk in all_risks
-        ) or any(clause.review_required for clause in parse_result.clauses)
+        ) or parse_result.review_required or any(
+            clause.review_required for clause in parse_result.clauses
+        )
         evaluation_failed = evaluation_failed or (
             bool(usable_risks)
             and eval_result.overall_score is None
