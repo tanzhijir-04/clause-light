@@ -30,7 +30,7 @@
 
 ## Task 1 最终验证记录（当前 Task 1 HEAD）
 
-- 验证基于 HEAD：`89442c351441aa8488af8adce3ce7e18d74c0e11`（短 SHA：`89442c35`）；本记录追加于不可变的 `769e9b43` 前置基线之后，不改写基线。
+- 验证基于 HEAD：`083c0cb047495e39dfc151a22ef58311180db93d`（短 SHA：`083c0cb0`）；本记录追加于不可变的 `769e9b43` 前置基线之后，不改写基线。
 - 两份内嵌校验器逐字同步：示例 manifest 校验通过，输出 `valid: experiments\\contract_pipeline\\manifest.example.jsonl (1 independent groups)`，exit code `0`。
 - 两份内嵌校验器的预期失败比较门禁均按预期失败，输出 `comparison set requires at least 6 independent groups, with 2 rental, 2 labor, and 2 service groups`，exit code `1`。
 - `python -m json.tool experiments/contract_pipeline/config.json`：exit code `0`。
