@@ -24,7 +24,7 @@ Create `experiments/data/manifest.local.jsonl` locally, one JSON object per line
 
 The minimum comparison set is six independent texts: two rental, two labor, and two service texts. PDF, TXT, and image variants of one underlying text must share the same `independent_group` and count as one independent text, even if every variant is run. If this minimum is not met, label the run development-only and make no cross-type comparison claim.
 
-Only use contracts for which the operator has documented authorization to process them. Keep real contracts and any personal data outside the repository; use redacted or synthetic inputs where possible. `input_path` must point to a private local path outside the repository, and `authorization_note` must be non-empty and identify the authorization basis. The literal `<private-input-path>` prefix is accepted only for this committed example validation; every real private input file must exist at its private path and have documented authorization before a run. Never commit the local manifest, real contract files, API keys, or raw outputs containing contract text or personal information.
+Only use contracts for which the operator has documented authorization to process them. Keep real contracts and any personal data outside the repository; use redacted or synthetic inputs where possible. `input_path` must point to a private local path outside the repository that resolves to an existing regular file, and `authorization_note` must be non-empty and identify the authorization basis. The exact `<private-input-path>/demo-rental-01.txt` sentinel is accepted only for this committed example validation; every real private input file must exist at its private path and have documented authorization before a run. Never commit the local manifest, real contract files, API keys, or raw outputs containing contract text or personal information.
 
 ### Manifest validation (fails nonzero on invalid input)
 
@@ -46,7 +46,7 @@ source_kinds = {"authorized", "txt", "pdf", "image"}
 repo_root = Path.cwd().resolve()
 groups = {}
 sample_ids = set()
-
+example_sentinel = "<private-input-path>/demo-rental-01.txt"
 with path.open(encoding="utf-8") as handle:
     for line_number, raw in enumerate(handle, 1):
         if not raw.strip():
@@ -57,11 +57,11 @@ with path.open(encoding="utf-8") as handle:
             raise SystemExit(f"line {line_number}: invalid JSON: {exc}")
         if not isinstance(record, dict) or set(record) != fields:
             raise SystemExit(f"line {line_number}: fields must be exactly {sorted(fields)}")
+        if not isinstance(record["sample_id"], str) or not record["sample_id"].strip():
+            raise SystemExit(f"line {line_number}: sample_id must be non-empty")
         if record["sample_id"] in sample_ids:
             raise SystemExit(f"line {line_number}: duplicate sample_id")
         sample_ids.add(record["sample_id"])
-        if not isinstance(record["sample_id"], str) or not record["sample_id"].strip():
-            raise SystemExit(f"line {line_number}: sample_id must be non-empty")
         if record["contract_type"] not in contract_types:
             raise SystemExit(f"line {line_number}: contract_type must be rental, labor, or service")
         if record["source_kind"] not in source_kinds:
@@ -75,15 +75,17 @@ with path.open(encoding="utf-8") as handle:
         if type(record["contains_personal_data"]) is not bool:
             raise SystemExit(f"line {line_number}: contains_personal_data must be boolean")
         input_path = record["input_path"]
-        if input_path.startswith("<private-input-path>") and not example_mode:
+        if example_mode and input_path != example_sentinel:
+            raise SystemExit(f"line {line_number}: only the exact example sentinel is allowed in example mode")
+        if not example_mode and input_path.startswith("<"):
             raise SystemExit(f"line {line_number}: placeholder input_path is allowed only in example mode")
-        if input_path.startswith("<") and not (example_mode and input_path.startswith("<private-input-path>/")):
-            raise SystemExit(f"line {line_number}: unsupported placeholder input_path")
-        if not input_path.startswith("<private-input-path>/"):
+        if input_path != example_sentinel:
             candidate = Path(input_path).expanduser()
             resolved = candidate.resolve() if candidate.is_absolute() else (repo_root / candidate).resolve()
             if resolved == repo_root or repo_root in resolved.parents:
                 raise SystemExit(f"line {line_number}: input_path must be outside the repository")
+            if not resolved.is_file():
+                raise SystemExit(f"line {line_number}: input_path must resolve to an existing regular file")
         group = record["independent_group"]
         previous_type = groups.setdefault(group, record["contract_type"])
         if previous_type != record["contract_type"]:
@@ -120,4 +122,4 @@ python -m json.tool experiments/contract_pipeline/config.json
 git diff --check
 ```
 
-For `TEST-FORMAT-001`, the full embedded validator above was executed twice: once with `$manifest_path = "experiments/contract_pipeline/manifest.example.jsonl"` and `$validator_flags = @('--example')` (schema PASS), and once with the same manifest and `$validator_flags = @('--example', '--require-comparison-set')` (intentional nonzero exit at the six-group gate; development-only). A private formal run uses `$validator_flags = @('--require-comparison-set')` without `--example`, so every placeholder-prefixed path is rejected. Suggested IDs are `CODE-CONFIG-001` (frozen config), `CODE-MANIFEST-001` (manifest schema and validation policy), `TEST-BASELINE-001` (repository tests), `TEST-FORMAT-001` (full config/example JSON validation and `git diff --check`), and `RUN-<date>-<id>` for each redacted experiment run. Reserve `HUMAN-<id>` only for a future documented legal-expert annotation process; no such evidence currently exists.
+For `TEST-FORMAT-001`, both synchronized embedded validators were executed with `$manifest_path = "experiments/contract_pipeline/manifest.example.jsonl"` and `$validator_flags = @('--example')` (schema PASS), and with the same manifest and `$validator_flags = @('--example', '--require-comparison-set')` (intentional nonzero exit at the six-group gate; development-only). Both also reject empty/null/numeric `sample_id` values before duplicate tracking and reject nonexistent private input paths. A private formal run uses `$validator_flags = @('--require-comparison-set')` without `--example`, so every placeholder-prefixed path is rejected. Suggested IDs are `CODE-CONFIG-001` (frozen config), `CODE-MANIFEST-001` (manifest schema and validation policy), `TEST-BASELINE-001` (repository tests), `TEST-FORMAT-001` (full config/example JSON validation and `git diff --check`), and `RUN-<date>-<id>` for each redacted experiment run. Reserve `HUMAN-<id>` only for a future documented legal-expert annotation process; no such evidence currently exists.

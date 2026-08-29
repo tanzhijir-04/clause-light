@@ -49,6 +49,8 @@
 
 ### Manifest 标准库校验
 
+校验器先确认 `sample_id` 是非空字符串，再进行重复追踪；私有/非示例路径必须解析为仓库外已存在的普通文件（`is_file()`）。`--example` 模式只接受精确的 `<private-input-path>/demo-rental-01.txt` 哨兵。
+
 从仓库根目录执行以下命令。它逐行解析 JSONL，严格检查 7 个字段、允许的合同类型/来源类型、`contains_personal_data` 的严格布尔类型、授权说明和仓库外路径，并在 `--require-comparison-set` 下强制 6 个独立组及每类 2 组；任一错误均以非零状态退出。PDF/TXT/图片变体共用 `independent_group`，只计一个独立文本。
 
 ```powershell
@@ -67,6 +69,7 @@ source_kinds = {"authorized", "txt", "pdf", "image"}
 repo_root = Path.cwd().resolve()
 groups = {}
 sample_ids = set()
+example_sentinel = "<private-input-path>/demo-rental-01.txt"
 with path.open(encoding="utf-8") as handle:
     for line_number, raw in enumerate(handle, 1):
         if not raw.strip():
@@ -77,13 +80,15 @@ with path.open(encoding="utf-8") as handle:
             raise SystemExit(f"line {line_number}: invalid JSON: {exc}")
         if not isinstance(record, dict) or set(record) != fields:
             raise SystemExit(f"line {line_number}: fields must be exactly {sorted(fields)}")
+        if not isinstance(record["sample_id"], str) or not record["sample_id"].strip():
+            raise SystemExit(f"line {line_number}: sample_id must be non-empty")
         if record["sample_id"] in sample_ids:
             raise SystemExit(f"line {line_number}: duplicate sample_id")
         sample_ids.add(record["sample_id"])
         if record["contract_type"] not in contract_types:
-            raise SystemExit(f"line {line_number}: invalid contract_type")
+            raise SystemExit(f"line {line_number}: contract_type must be rental, labor, or service")
         if record["source_kind"] not in source_kinds:
-            raise SystemExit(f"line {line_number}: invalid source_kind")
+            raise SystemExit(f"line {line_number}: source_kind must be authorized, txt, pdf, or image")
         if not isinstance(record["input_path"], str) or not record["input_path"].strip():
             raise SystemExit(f"line {line_number}: input_path must be non-empty")
         if not isinstance(record["authorization_note"], str) or not record["authorization_note"].strip():
@@ -93,28 +98,33 @@ with path.open(encoding="utf-8") as handle:
         if type(record["contains_personal_data"]) is not bool:
             raise SystemExit(f"line {line_number}: contains_personal_data must be boolean")
         input_path = record["input_path"]
-        if input_path.startswith("<private-input-path>") and not example_mode:
+        if example_mode and input_path != example_sentinel:
+            raise SystemExit(f"line {line_number}: only the exact example sentinel is allowed in example mode")
+        if not example_mode and input_path.startswith("<"):
             raise SystemExit(f"line {line_number}: placeholder input_path is allowed only in example mode")
-        if input_path.startswith("<") and not (example_mode and input_path.startswith("<private-input-path>/")):
-            raise SystemExit(f"line {line_number}: unsupported placeholder input_path")
-        if not input_path.startswith("<private-input-path>/"):
+        if input_path != example_sentinel:
             candidate = Path(input_path).expanduser()
             resolved = candidate.resolve() if candidate.is_absolute() else (repo_root / candidate).resolve()
             if resolved == repo_root or repo_root in resolved.parents:
                 raise SystemExit(f"line {line_number}: input_path must be outside the repository")
+            if not resolved.is_file():
+                raise SystemExit(f"line {line_number}: input_path must resolve to an existing regular file")
         group = record["independent_group"]
         previous_type = groups.setdefault(group, record["contract_type"])
         if previous_type != record["contract_type"]:
-            raise SystemExit(f"line {line_number}: independent_group mixes contract types")
+            raise SystemExit(f"line {line_number}: one independent_group cannot mix contract types")
+
 if require_comparison_set:
     counts = Counter(groups.values())
     if len(groups) < 6 or any(counts[item] < 2 for item in contract_types):
-        raise SystemExit("requires 6 independent groups: 2 rental, 2 labor, 2 service")
+        raise SystemExit("comparison set requires at least 6 independent groups, with 2 rental, 2 labor, and 2 service groups")
 print(f"valid: {path} ({len(groups)} independent groups)")
 '@ | python - $manifest_path $validator_flags
 ```
 
 对私有 manifest 设置 `$manifest_path = "experiments/data/manifest.local.jsonl"`、`$validator_flags = @('--require-comparison-set')`，再执行上方完整校验器。对提交的示例 manifest 设置 `$manifest_path = "experiments/contract_pipeline/manifest.example.jsonl"`、`$validator_flags = @('--example')`，再执行同一完整校验器；只有精确的 `<private-input-path>/...` 示例哨兵可通过。私有 manifest 不得使用任何占位符前缀，且重复 `sample_id` 必须失败；真实输入文件必须存在于私有路径并已获授权。示例只有一个独立组，所以只能标记 development-only。
+
+两份同步校验器的记录结果：空、null、数字 `sample_id` 均以 `line 1: sample_id must be non-empty` 非零退出；六组但含 phantom 私有输入的 manifest 均以 `line 1: input_path must resolve to an existing regular file` 非零退出。
 
 ## 当前证据登记
 
@@ -124,7 +134,7 @@ print(f"valid: {path} ({len(groups)} independent groups)")
 | `TEST-BASELINE-001` | TEST | `pytest`：255 collected，253 passed，2 skipped，23 warnings，exit 0 | 仅证明仓库测试通过，不证明法律准确率 |
 | `CODE-CONFIG-001` | CODE | `experiments/contract_pipeline/config.json` 的冻结运行参数 | provider/model lock 为空；不得混用有效配置 |
 | `CODE-MANIFEST-001` | CODE | 私有 manifest 的严格字段和 6 文本最低样本规则 | 不满足时仅 development-only |
-| `TEST-FORMAT-001` | TEST | 已执行配置 JSON 校验、示例 manifest 全行/schema 校验（`--example`）及正式比较门禁校验（`--require-comparison-set`）和 `git diff --check` | 2026-08-29：example schema 校验通过；比较门禁按预期以非零退出并标记 development-only；`git diff --check` 通过 |
+| `TEST-FORMAT-001` | TEST | 已执行配置 JSON 校验、示例 manifest 全行/schema 校验（`--example`）及正式比较门禁校验（`--require-comparison-set`）和 `git diff --check` | 2026-08-29：两份同步校验器均拒绝空/null/数字 `sample_id`，并拒绝不存在的私有输入文件；example schema 校验通过；comparison gate 按预期以非零退出并标记 development-only；`git diff --check` 通过 |
 | `RUN-<date>-<id>` | RUN | 脱敏实验聚合结果、配置摘要和样本计数 | 每次运行追加真实 ID；不得包含合同正文/个人信息 |
 | `HUMAN-<id>` | HUMAN | 未来法律专家 gold label 或独立复核 | 当前不存在；法律准确率未评估 |
 
