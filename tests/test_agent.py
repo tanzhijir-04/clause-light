@@ -8,6 +8,7 @@ import pytest
 
 from server.core.agent import AnalysisResult, ContractAgent, TYPE_EN_MAP
 from server.core.document_ingress import DocumentResult
+from server.core.llm import StructuredLLMResponse
 from server.core.workers.parser import ClauseItem, ParseResult
 from server.core.workers.workers import ClauseRisk
 from server.core.workers.evaluator import EvaluationResult, evaluate as real_evaluate
@@ -23,6 +24,8 @@ class TestAnalysisResult:
         assert result.overall_score is None
         assert result.clauses == []
         assert result.red_count == 0
+        assert result.analysis_status == "failed"
+        assert result.recommendation == "manual_review"
 
     def test_custom_values(self):
         """测试自定义值"""
@@ -89,9 +92,16 @@ def _mock_eval_result(score=85, red=0, yellow=0, green=1, recommendation="sign",
 
 
 def _configure_session(mock_factory):
-    mock_session = AsyncMock()
+    mock_session = MagicMock()
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=False)
+    execute_result = MagicMock()
+    execute_result.scalars.return_value.all.return_value = []
+    execute_result.scalar_one_or_none.return_value = None
+    mock_session.execute = AsyncMock(return_value=execute_result)
+    mock_session.flush = AsyncMock()
+    mock_session.get = AsyncMock(return_value=None)
+    mock_session.commit = AsyncMock()
     mock_factory.return_value = mock_session
 
 
@@ -112,6 +122,9 @@ class TestContractAgent:
         result = await self.agent.analyze(file_path="test.pdf")
         assert result.contract_id == ""
         assert "为空" in result.error
+        assert result.analysis_status == "failed"
+        assert result.recommendation == "manual_review"
+        assert result.review_reasons["pipeline"]
 
     @patch("server.core.agent.evaluate")
     @patch("server.core.agent.analyze_dimension")
@@ -145,10 +158,7 @@ class TestContractAgent:
         mock_evaluate.return_value = _mock_eval_result()
 
         # 知识库 / 记忆 mock（装配失败应降级，不阻断主流程）
-        mock_session = AsyncMock()
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=False)
-        mock_factory.return_value = mock_session
+        _configure_session(mock_factory)
 
         result = await self.agent.analyze(file_path="test.pdf")
         assert result.overall_score == 85
@@ -182,10 +192,7 @@ class TestContractAgent:
         mock_dimension.side_effect = _fake_dimension
         mock_evaluate.return_value = _mock_eval_result(score=60, yellow=1, green=0, recommendation="negotiate_first", summary="试用期条款需修改")
 
-        mock_session = AsyncMock()
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=False)
-        mock_factory.return_value = mock_session
+        _configure_session(mock_factory)
 
         result = await self.agent.analyze(
             file_path="test.pdf",
@@ -208,16 +215,15 @@ class TestContractAgent:
         # Stage 1 失败
         mock_parse.side_effect = Exception("LLM 不可用")
 
-        mock_session = AsyncMock()
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=False)
-        mock_factory.return_value = mock_session
+        _configure_session(mock_factory)
 
         result = await self.agent.analyze(file_path="test.pdf")
         # Stage 1 失败时兜底：全文作为一个条款
         assert len(result.clauses) > 0, "LLM 失败时条款不应丢失"
         assert result.clauses[0]["risk_level"] == "unknown"
         assert result.clauses[0]["needs_review"] is True
+        assert result.analysis_status == "failed"
+        assert result.recommendation == "manual_review"
 
     @patch("server.core.agent.document_ingress.ingest", new_callable=AsyncMock)
     async def test_analyze_step_callback(self, mock_ingest):
@@ -237,6 +243,94 @@ class TestContractAgent:
         result = await self.agent.analyze(file_path="test.pdf")
         assert result.contract_id == ""
         assert "文档解析失败" in result.error
+        assert result.analysis_status == "failed"
+        assert result.recommendation == "manual_review"
+        assert result.review_reasons["pipeline"]
+
+    @pytest.mark.asyncio
+    async def test_evaluator_rejects_malformed_fallback_fields(self):
+        valid = ClauseRisk(clause_id="1", risk_level="green", severity=1)
+        failed = ClauseRisk(
+            clause_id="2",
+            risk_level="unknown",
+            analysis_status="failed",
+            review_required=True,
+        )
+        llm = MagicMock()
+        malformed_payloads = [
+            {
+                "overall_score": "99",
+                "recommendation": "sign",
+                "risk_distribution": {"red": 0, "yellow": 0, "green": 1, "unknown": 0},
+            },
+            {
+                "overall_score": 99,
+                "recommendation": "invalid",
+                "risk_distribution": {"red": 0, "yellow": 0, "green": 1, "unknown": 0},
+            },
+            {
+                "overall_score": 99,
+                "recommendation": "sign",
+                "risk_distribution": {
+                    "red": 0,
+                    "yellow": 0,
+                    "green": 1,
+                    "unknown": 0,
+                    "purple": 10,
+                },
+            },
+        ]
+
+        for malformed in malformed_payloads:
+            llm.chat_structured = AsyncMock(
+                return_value=StructuredLLMResponse(
+                    content="malformed evaluation",
+                    parsed=None,
+                )
+            )
+            llm.parse_json = MagicMock(return_value=malformed)
+
+            result = await real_evaluate([valid, failed], llm)
+
+            assert result.overall_score is None
+            assert result.recommendation == "manual_review"
+            assert set(result.risk_distribution) == {"red", "yellow", "green", "unknown"}
+            assert result.risk_distribution == {"red": 0, "yellow": 0, "green": 1, "unknown": 1}
+            assert all(
+                type(count) is int and count >= 0
+                for count in result.risk_distribution.values()
+            )
+            assert result.needs_review == ["2"]
+
+    @pytest.mark.asyncio
+    async def test_evaluator_parse_json_failure_returns_safe_manual_review(self):
+        valid = ClauseRisk(clause_id="1", risk_level="green", severity=1)
+        failed = ClauseRisk(
+            clause_id="2",
+            risk_level="unknown",
+            analysis_status="failed",
+            review_required=True,
+        )
+        llm = MagicMock()
+        llm.chat_structured = AsyncMock(
+            return_value=StructuredLLMResponse(
+                content="not json",
+                parsed=None,
+            )
+        )
+        llm.parse_json = MagicMock(side_effect=ValueError("malformed JSON"))
+
+        result = await real_evaluate([valid, failed], llm)
+
+        assert result.overall_score is None
+        assert result.recommendation == "manual_review"
+        assert result.risk_distribution == {
+            "red": 0,
+            "yellow": 0,
+            "green": 1,
+            "unknown": 1,
+        }
+        assert result.needs_review == ["2"]
 
     @patch("server.core.agent.evaluate")
     @patch("server.core.agent.analyze_dimension")
@@ -269,10 +363,7 @@ class TestContractAgent:
         mock_dimension.side_effect = _fake_dimension
         mock_evaluate.return_value = _mock_eval_result(score=35, red=1, green=1, recommendation="negotiate_first", summary="有高风险条款")
 
-        mock_session = AsyncMock()
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=False)
-        mock_factory.return_value = mock_session
+        _configure_session(mock_factory)
 
         result = await self.agent.analyze(file_path="test.pdf")
         assert result.overall_score == 35
@@ -302,20 +393,49 @@ class TestContractAgent:
         ):
             if dim == "equity":
                 raise Exception("Worker 崩溃")
+            if dim == "financial":
+                return [ClauseRisk(clause_id="1", risk_level="green", severity=2)]
             return []
 
         mock_dimension.side_effect = _fake_dimension
         mock_evaluate.return_value = _mock_eval_result(score=50, green=1)
 
-        mock_session = AsyncMock()
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=False)
-        mock_factory.return_value = mock_session
+        _configure_session(mock_factory)
 
         result = await self.agent.analyze(file_path="test.pdf")
         # equity Worker 失败，但其他 Worker 和整体流程应继续
         assert len(result.clauses) >= 1
         assert result.contract_type == "租赁合同"
+        assert result.analysis_status == "partial"
+        assert result.needs_review == ["1"]
+
+    @patch("server.core.agent.evaluate")
+    @patch("server.core.agent.analyze_dimension")
+    @patch("server.core.agent.parse_contract")
+    @patch("server.core.agent.async_session_factory")
+    @patch("server.core.agent.document_ingress.ingest", new_callable=AsyncMock)
+    async def test_parse_failure_with_usable_worker_result_is_partial(
+        self, mock_ingest, mock_factory, mock_parse, mock_dimension, mock_evaluate
+    ):
+        mock_ingest.return_value = _make_doc_result("合同内容")
+        mock_parse.side_effect = RuntimeError("解析失败")
+
+        async def _fake_dimension(
+            dim, clauses, llm, contract_type, kb_rules=None, kb_laws=None, memory_context=""
+        ):
+            if dim == "general":
+                return [ClauseRisk(clause_id="1", risk_level="green", severity=2)]
+            return []
+
+        mock_dimension.side_effect = _fake_dimension
+        mock_evaluate.return_value = _mock_eval_result()
+        _configure_session(mock_factory)
+
+        result = await self.agent.analyze(file_path="test.pdf")
+
+        assert result.analysis_status == "partial"
+        assert result.error
+        assert result.review_reasons["pipeline"]
 
     @patch("server.core.agent.analyze_dimension_with_context")
     @patch("server.core.agent.evaluate")
@@ -358,6 +478,74 @@ class TestContractAgent:
         assert result.clauses[0]["risk_level"] == "unknown"
         assert result.clauses[0]["needs_review"] is True
         assert result.green_count == 0
+
+    @patch("server.core.agent.analyze_dimension_with_context")
+    @patch("server.core.agent.evaluate")
+    @patch("server.core.agent.analyze_dimension")
+    @patch("server.core.agent.parse_contract")
+    @patch("server.core.agent.async_session_factory")
+    @patch("server.core.agent.document_ingress.ingest", new_callable=AsyncMock)
+    async def test_foreign_resolution_id_is_not_scored_as_green(
+        self,
+        mock_ingest,
+        mock_factory,
+        mock_parse,
+        mock_dimension,
+        mock_evaluate,
+        mock_resolve,
+    ):
+        mock_ingest.return_value = _make_doc_result("合同内容")
+        clause = ClauseItem(
+            id="1",
+            type="payment",
+            title="付款",
+            text="验收后付款",
+            relevance=["equity", "financial"],
+        )
+        mock_parse.return_value = _mock_parse_result(clauses=[clause])
+
+        async def _fake_dimension(
+            dim, clauses, llm, contract_type, kb_rules=None, kb_laws=None, memory_context=""
+        ):
+            if dim == "equity":
+                return [ClauseRisk(clause_id="1", risk_level="red")]
+            if dim == "financial":
+                return [ClauseRisk(clause_id="1", risk_level="green")]
+            return []
+
+        mock_dimension.side_effect = _fake_dimension
+        mock_resolve.return_value = ClauseRisk(
+            clause_id="999", risk_level="green", severity=10
+        )
+        scored_risks = []
+
+        async def _capture_evaluate(risks, llm):
+            scored_risks.extend(risks)
+            if any(
+                risk.analysis_status in {"completed", "resolved"}
+                and risk.risk_level == "green"
+                for risk in risks
+            ):
+                return _mock_eval_result(score=80, green=1)
+            return _mock_eval_result(
+                score=None,
+                green=0,
+                recommendation="manual_review",
+                summary="系统未形成可用评级，请人工复核",
+            )
+
+        mock_evaluate.side_effect = _capture_evaluate
+        _configure_session(mock_factory)
+
+        result = await self.agent.analyze(file_path="test.pdf")
+
+        assert scored_risks
+        assert all(risk.clause_id == "1" for risk in scored_risks)
+        assert all(risk["clause_id"] != "999" for risk in result.worker_risks)
+        assert result.clauses[0]["risk_level"] == "unknown"
+        assert result.green_count == 0
+        assert result.analysis_status == "failed"
+        assert result.recommendation == "manual_review"
 
     @patch("server.core.agent.analyze_dimension_with_context")
     @patch("server.core.agent.evaluate")
@@ -418,10 +606,7 @@ class TestContractAgent:
         mock_dimension.return_value = []
         mock_evaluate.return_value = _mock_eval_result()
 
-        mock_session = AsyncMock()
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=False)
-        mock_factory.return_value = mock_session
+        _configure_session(mock_factory)
 
         result = await self.agent.analyze(file_path="contract.docx")
         assert "条款一" in result.ocr_text

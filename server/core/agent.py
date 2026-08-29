@@ -38,7 +38,7 @@ class AnalysisResult:
     contract_type: str = ""
     contract_type_en: str = "other"
     overall_score: int | None = None
-    recommendation: str = "negotiate_first"
+    recommendation: str = "manual_review"
     summary: str = ""
     model_used: str = ""
     clauses: list[dict] = field(default_factory=list)
@@ -50,7 +50,7 @@ class AnalysisResult:
     ocr_text: str = ""  # 文档解析全文（AnyDoc/OCR；字段名保持兼容，供原文标注视图）
     error: str = ""  # 分析失败时的错误信息，调用方可据此判断成功/失败
     session_id: str = ""  # L0 记忆会话 id（可选，旧客户端可忽略）
-    analysis_status: str = "completed"
+    analysis_status: str = "failed"
     review_reasons: dict[str, list[str]] = field(default_factory=dict)
     worker_risks: list[dict] = field(default_factory=list)
     processing_mode: str = ""
@@ -90,6 +90,14 @@ class ContractAgent:
         result = AnalysisResult()
         contract_id = uuid.uuid4().hex
 
+        def _pipeline_failure(message: str) -> AnalysisResult:
+            result.error = message
+            result.recommendation = "manual_review"
+            result.summary = "系统未形成可用分析，请人工复核"
+            result.analysis_status = "failed"
+            result.review_reasons = {"pipeline": [message]}
+            return result
+
         # ── 文档解析（AnyDoc / PaddleOCR / 纯文本）──
         await _notify(1, 5, "正在识别文字...")
         logger.info("文档解析开始")
@@ -99,8 +107,7 @@ class ContractAgent:
             )
             if not doc_result or not doc_result.full_text.strip():
                 logger.error("文档解析结果为空")
-                result.error = "文档解析结果为空，无法分析"
-                return result
+                return _pipeline_failure("文档解析结果为空，无法分析")
             full_text = doc_result.full_text
             result.ocr_text = full_text  # 字段名保持 ocr_text，内容可为 Markdown
 
@@ -112,16 +119,19 @@ class ContractAgent:
                 )
         except Exception as e:
             logger.error("文档解析失败: %s", e)
-            result.error = f"文档解析失败: {e}"
-            return result
+            return _pipeline_failure(f"文档解析失败: {e}")
 
         # ── Stage 1: 结构解析 ──
         await _notify(2, 5, "正在解析合同结构...")
         logger.info("Stage 1: 结构解析")
+        parse_failed = False
+        parse_failure_reason = ""
         try:
             parse_result = await parse_contract(full_text, self.llm, contract_type_hint)
         except Exception as e:
             logger.error("Stage 1 失败: %s", e)
+            parse_failed = True
+            parse_failure_reason = str(e)
             # 兜底：全文作为一个条款
             parse_result = ParseResult(
                 contract_type=contract_type_hint or "其他",
@@ -129,7 +139,14 @@ class ContractAgent:
                     id="1", type="other", title="全文",
                     text=full_text[:2000], relevance=["general"],
                 )],
+                parse_failed=True,
+                failure_reason=str(e),
             )
+
+        parse_failed = parse_failed or parse_result.parse_failed
+        parse_failure_reason = parse_failure_reason or parse_result.failure_reason
+        if parse_failed:
+            result.error = f"合同结构解析失败: {parse_failure_reason or '未知原因'}"
 
         result.contract_type = parse_result.contract_type
         result.contract_type_en = parse_result.contract_type_en
@@ -248,18 +265,35 @@ class ContractAgent:
         ]
         worker_results = await asyncio.gather(*worker_tasks, return_exceptions=True)
 
-        # 合并所有 Worker 结果
+        # 合并所有 Worker 结果，同时丢弃不属于本维度请求的条款 id。
         all_risks: list[ClauseRisk] = []
         for dim, res in zip(DIMENSIONS, worker_results):
+            relevant_clauses = [
+                clause for clause in parse_result.clauses if dim in clause.relevance
+            ]
+            expected_ids = {clause.id for clause in relevant_clauses}
             if isinstance(res, Exception):
                 logger.warning("Worker[%s] 失败: %s", dim, res)
                 all_risks.extend(
                     failed_clause_risk(clause, dim, str(res))
-                    for clause in parse_result.clauses
-                    if dim in clause.relevance
+                    for clause in relevant_clauses
                 )
             elif isinstance(res, list):
-                all_risks.extend(res)
+                accepted = [risk for risk in res if risk.clause_id in expected_ids]
+                foreign = [risk for risk in res if risk.clause_id not in expected_ids]
+                if foreign:
+                    logger.warning(
+                        "Worker[%s] 返回非请求条款 id=%s，已忽略",
+                        dim,
+                        sorted({risk.clause_id for risk in foreign}),
+                    )
+                all_risks.extend(accepted)
+                returned_ids = {risk.clause_id for risk in accepted}
+                all_risks.extend(
+                    failed_clause_risk(clause, dim, "Worker 未返回该条款评级")
+                    for clause in relevant_clauses
+                    if clause.id not in returned_ids
+                )
 
         # Worker 返回空列表时也要为相关条款留下可复核的失败结果。
         for clause in parse_result.clauses:
@@ -360,6 +394,19 @@ class ContractAgent:
                 except Exception as exc:
                     new_risk = failed_clause_risk(clause, resolve_dim, str(exc))
 
+                if new_risk and new_risk.clause_id != clause_id:
+                    logger.warning(
+                        "冲突解决返回非请求条款 id=%s，期望=%s",
+                        new_risk.clause_id,
+                        clause_id,
+                    )
+                    new_risk = failed_clause_risk(
+                        clause,
+                        resolve_dim,
+                        f"冲突解决返回了非请求条款 id={new_risk.clause_id}",
+                    )
+                    new_risk.phase = "resolved"
+
                 if new_risk:
                     # 用新结果替换冲突中的旧结果
                     all_risks = [
@@ -375,12 +422,18 @@ class ContractAgent:
         # ── Stage 3: 聚合评分 ──
         await _notify(4, 5, "正在聚合评分...")
         logger.info("Stage 3: 聚合评分")
+        evaluation_failed = False
         try:
             eval_result = await evaluate(all_risks, self.llm)
         except Exception as e:
             logger.warning("Stage 3 失败: %s", e)
+            evaluation_failed = True
             # 兜底：直接统计
-            eval_result = EvaluationResult()
+            eval_result = EvaluationResult(
+                overall_score=None,
+                recommendation="manual_review",
+                one_line_summary="系统未形成可用评级，请人工复核",
+            )
             for r in all_risks:
                 if r.risk_level in eval_result.risk_distribution:
                     eval_result.risk_distribution[r.risk_level] += 1
@@ -413,19 +466,38 @@ class ContractAgent:
         result.processing_mode = "parallel"
         result.worker_risks = [asdict(r) for r in all_risks]
         result.review_reasons = {}
+        if parse_failed:
+            result.review_reasons["pipeline"] = [
+                parse_failure_reason or "合同结构解析失败"
+            ]
         for risk in all_risks:
             if risk.review_required or risk.clause_id in result.needs_review:
                 reason = risk.review_reason or risk.failure_reason or "需要人工复核"
                 result.review_reasons.setdefault(risk.clause_id, []).append(reason)
-        result.analysis_status = (
-            "completed"
-            if any(
-                r.analysis_status in {"completed", "resolved"}
-                and r.risk_level in {"red", "yellow", "green"}
-                for r in all_risks
-            )
-            else "failed"
+        usable_risks = [
+            risk
+            for risk in all_risks
+            if risk.analysis_status in {"completed", "resolved"}
+            and risk.risk_level in {"red", "yellow", "green"}
+        ]
+        has_risk_failure = any(
+            risk not in usable_risks or risk.review_required for risk in all_risks
         )
+        evaluation_failed = evaluation_failed or (
+            bool(usable_risks)
+            and eval_result.overall_score is None
+            and eval_result.recommendation == "manual_review"
+        )
+        if not usable_risks:
+            result.analysis_status = "failed"
+            if type(result.overall_score) is not int:
+                result.overall_score = None
+            result.recommendation = "manual_review"
+            result.summary = "系统未形成可用评级，请人工复核"
+        elif parse_failed or evaluation_failed or has_risk_failure:
+            result.analysis_status = "partial"
+        else:
+            result.analysis_status = "completed"
 
         # 组装条款列表（合并解析结果和风险评估结果）
         # 同一 clause_id + 同一维度只保留 severity 最高的

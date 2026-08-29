@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 
 RiskDimension = Literal["equity", "financial", "ip", "dispute", "general"]
@@ -50,16 +50,27 @@ class ClauseRiskListSchema(BaseModel):
     risks: list[ClauseRiskSchema] = Field(default_factory=list)
 
 
+class RiskDistributionSchema(BaseModel):
+    """Stage 3 风险分布，只允许固定的非负整数计数。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    red: StrictInt = Field(default=0, ge=0)
+    yellow: StrictInt = Field(default=0, ge=0)
+    green: StrictInt = Field(default=0, ge=0)
+    unknown: StrictInt = Field(default=0, ge=0)
+
+
 class EvaluationSchema(BaseModel):
     """Stage 3 聚合评分"""
 
-    overall_score: int = Field(default=50, ge=0, le=100)
+    overall_score: StrictInt = Field(default=50, ge=0, le=100)
     recommendation: Literal["sign", "negotiate_first", "reject"] = "negotiate_first"
     one_line_summary: str = ""
     needs_review: list[str] = Field(default_factory=list)
     top_risks: list[str] = Field(default_factory=list)
-    risk_distribution: dict[str, int] = Field(
-        default_factory=lambda: {"red": 0, "yellow": 0, "green": 0, "unknown": 0}
+    risk_distribution: RiskDistributionSchema = Field(
+        default_factory=RiskDistributionSchema
     )
 
 

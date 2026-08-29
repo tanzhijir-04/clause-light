@@ -212,7 +212,16 @@ async def analyze_dimension(
         logger.warning("Worker[%s]: JSON/Schema 解析失败: %s", dimension, exc)
         return [failed_clause_risk(c, dimension, str(exc)) for c in relevant]
 
+    expected_ids = {c.id for c in relevant}
     risk_items = [r.model_dump() for r in parsed_model.risks]
+    foreign_items = [item for item in risk_items if item["clause_id"] not in expected_ids]
+    if foreign_items:
+        logger.warning(
+            "Worker[%s]: 忽略非请求条款 id=%s",
+            dimension,
+            sorted({item["clause_id"] for item in foreign_items}),
+        )
+    risk_items = [item for item in risk_items if item["clause_id"] in expected_ids]
     if not risk_items:
         return [failed_clause_risk(c, dimension, "LLM 未返回任何条款评级") for c in relevant]
 
@@ -334,6 +343,21 @@ async def analyze_dimension_with_context(
             parsed = ClauseRiskSchema.model_validate(raw).model_dump()
         except Exception as exc:
             return failed_clause_risk(clause, dimension, str(exc))
+
+    if parsed["clause_id"] != clause.id:
+        logger.warning(
+            "Worker[%s] 第二轮返回非请求条款 id=%s，期望=%s",
+            dimension,
+            parsed["clause_id"],
+            clause.id,
+        )
+        failed = failed_clause_risk(
+            clause,
+            dimension,
+            f"LLM 返回了非请求条款 id={parsed['clause_id']}",
+        )
+        failed.phase = "resolved"
+        return failed
 
     return ClauseRisk(
         clause_id=parsed["clause_id"],

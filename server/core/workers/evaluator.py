@@ -26,6 +26,49 @@ class EvaluationResult:
     top_risks: list[str] = field(default_factory=list)
 
 
+def _distribution_from_risks(
+    valid_risks: list[ClauseRisk], failed_count: int
+) -> dict[str, int]:
+    """从已验证的 Worker 结果生成安全的固定键分布。"""
+    distribution = {"red": 0, "yellow": 0, "green": 0, "unknown": failed_count}
+    for risk in valid_risks:
+        distribution[risk.risk_level] += 1
+    return distribution
+
+
+def _manual_review_result(
+    valid_risks: list[ClauseRisk],
+    failed_clause_ids: set[str],
+    failed_count: int,
+    needs_review: list[str] | None = None,
+) -> EvaluationResult:
+    return EvaluationResult(
+        overall_score=None,
+        risk_distribution=_distribution_from_risks(valid_risks, failed_count),
+        recommendation="manual_review",
+        one_line_summary="系统未形成可用评级，请人工复核",
+        needs_review=sorted(set(needs_review or []) | failed_clause_ids),
+    )
+
+
+def _validate_evaluation(
+    parsed: object,
+) -> EvaluationSchema | None:
+    """在任何字段写入 EvaluationResult 前进行严格 schema 校验。"""
+    if isinstance(parsed, EvaluationSchema):
+        candidate: object = parsed.model_dump()
+    elif isinstance(parsed, dict) and parsed:
+        candidate = parsed
+    else:
+        return None
+
+    try:
+        return EvaluationSchema.model_validate(candidate)
+    except Exception as exc:
+        logger.warning("Stage 3 评估结果校验失败: %s", exc)
+        return None
+
+
 async def evaluate(
     clause_risks: list[ClauseRisk],
     llm: LLMGateway,
@@ -42,17 +85,8 @@ async def evaluate(
     failed_count = len(failed_risks)
 
     if not valid_risks:
-        return EvaluationResult(
-            overall_score=None,
-            risk_distribution={
-                "red": 0,
-                "yellow": 0,
-                "green": 0,
-                "unknown": failed_count,
-            },
-            recommendation="manual_review",
-            one_line_summary="系统未形成可用评级，请人工复核",
-            needs_review=sorted(failed_clause_ids),
+        return _manual_review_result(
+            valid_risks, failed_clause_ids, failed_count
         )
 
     result = EvaluationResult()
@@ -102,25 +136,23 @@ async def evaluate(
         messages, schema=EvaluationSchema, task="scoring"
     )
 
-    if isinstance(resp.parsed, EvaluationSchema):
-        parsed = resp.parsed.model_dump()
-        result.overall_score = parsed.get("overall_score", 50)
-        result.risk_distribution = parsed.get(
-            "risk_distribution", {"red": 0, "yellow": 0, "green": 0}
-        )
-        result.recommendation = parsed.get("recommendation", "negotiate_first")
-        result.one_line_summary = parsed.get("one_line_summary", "")
-        result.top_risks = parsed.get("top_risks", [])
-    elif resp.content:
-        parsed = llm.parse_json(resp.content)
-        if isinstance(parsed, dict):
-            result.overall_score = parsed.get("overall_score", 50)
-            result.risk_distribution = parsed.get(
-                "risk_distribution", {"red": 0, "yellow": 0, "green": 0}
-            )
-            result.recommendation = parsed.get("recommendation", "negotiate_first")
-            result.one_line_summary = parsed.get("one_line_summary", "")
-            result.top_risks = parsed.get("top_risks", [])
+    parsed: object = resp.parsed
+    if parsed is None and resp.content:
+        try:
+            parsed = llm.parse_json(resp.content)
+        except Exception as exc:
+            logger.warning("Stage 3 JSON 解析失败: %s", exc)
+            parsed = None
+    validated = _validate_evaluation(parsed)
+    if validated is None:
+        return _manual_review_result(valid_risks, failed_clause_ids, failed_count, needs_review)
+
+    parsed_data = validated.model_dump()
+    result.overall_score = parsed_data["overall_score"]
+    result.risk_distribution = parsed_data["risk_distribution"]
+    result.recommendation = parsed_data["recommendation"]
+    result.one_line_summary = parsed_data["one_line_summary"]
+    result.top_risks = parsed_data["top_risks"]
 
     # ── 兜底：如果 LLM 没给出分布，从可靠条款统计 ──
     if not any(result.risk_distribution.get(level, 0) for level in ("red", "yellow", "green")):

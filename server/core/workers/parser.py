@@ -82,6 +82,8 @@ class ParseResult:
     complexity: str = "standard"       # standard / complex
     recommended_model: str = "fast"    # fast / strong
     clauses: list[ClauseItem] = field(default_factory=list)
+    parse_failed: bool = False
+    failure_reason: str = ""
 
 
 # ── 文本分段 ──
@@ -178,6 +180,8 @@ async def parse_contract(
     contract_type_en = TYPE_EN_MAP.get(contract_type, "other")
     complexity = "standard"
     recommended_model = "fast"
+    parse_failed = False
+    failure_reason = ""
 
     for i, chunk in enumerate(chunks):
         chunk_result = await _parse_single_chunk(
@@ -188,6 +192,10 @@ async def parse_contract(
         if i == 0:
             contract_type = chunk_result.contract_type
             contract_type_en = chunk_result.contract_type_en
+        if chunk_result.parse_failed:
+            parse_failed = True
+            if not failure_reason:
+                failure_reason = chunk_result.failure_reason
 
         all_clauses.extend(chunk_result.clauses)
 
@@ -210,6 +218,8 @@ async def parse_contract(
         contract_type_en=contract_type_en,
         complexity=complexity,
         recommended_model=recommended_model,
+        parse_failed=parse_failed,
+        failure_reason=failure_reason,
         clauses=unique_clauses if unique_clauses else [ClauseItem(
             id="1", type="other", title="全文",
             text=full_text[:2000], relevance=["general"],
@@ -283,6 +293,8 @@ async def _parse_single_chunk(
 
     if not resp.content and resp.parsed is None:
         logger.error("Stage 1 LLM 返回空内容")
+        result.parse_failed = True
+        result.failure_reason = "LLM 返回空内容"
         return result
 
     parsed_model = resp.parsed
@@ -290,11 +302,15 @@ async def _parse_single_chunk(
         raw = llm.parse_json(resp.content)
         if not isinstance(raw, dict):
             logger.warning("Stage 1 JSON 解析失败")
+            result.parse_failed = True
+            result.failure_reason = "JSON 根对象不是解析结果"
             return result
         try:
             parsed_model = ParseResultSchema.model_validate(raw)
         except Exception as e:
             logger.warning("Stage 1 Schema 校验失败: %s", e)
+            result.parse_failed = True
+            result.failure_reason = str(e)
             return result
 
     assert isinstance(parsed_model, ParseResultSchema)
