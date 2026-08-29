@@ -8,7 +8,12 @@ import pytest
 
 from server.core.llm import StructuredLLMResponse
 from server.core.workers.parser import ClauseItem
-from server.core.workers.workers import analyze_dimension, analyze_dimension_with_context
+from server.core.workers import workers as workers_module
+from server.core.workers.workers import (
+    ClauseRisk,
+    analyze_dimension,
+    analyze_dimension_with_context,
+)
 
 
 def _clause() -> ClauseItem:
@@ -19,6 +24,54 @@ def _clause() -> ClauseItem:
         text="验收后付款",
         relevance=["financial"],
     )
+
+
+def _risk(level: str, *, dimension: str = "general", status: str = "completed") -> ClauseRisk:
+    return ClauseRisk(
+        clause_id="1",
+        risk_level=level,
+        dimension=dimension,
+        analysis_status=status,
+    )
+
+
+@pytest.mark.parametrize(
+    ("levels", "should_resolve"),
+    [
+        (("red", "yellow"), False),
+        (("yellow", "green"), False),
+        (("red", "green"), True),
+    ],
+)
+def test_detect_conflicts_keeps_all_valid_rating_disagreements(levels, should_resolve):
+    conflicts = workers_module.detect_conflicts(
+        [_risk(levels[0], dimension="equity"), _risk(levels[1], dimension="financial")]
+    )
+
+    assert set(conflicts) == {"1"}
+    assert callable(getattr(workers_module, "requires_resolution", None))
+    assert workers_module.requires_resolution(conflicts["1"]) is should_resolve
+
+
+def test_detect_conflicts_ignores_unknown_and_failed_results():
+    conflicts = workers_module.detect_conflicts(
+        [
+            _risk("red", dimension="equity"),
+            _risk("unknown", dimension="financial", status="failed"),
+            _risk("green", dimension="general", status="failed"),
+        ]
+    )
+
+    assert conflicts == {}
+
+
+def test_requires_resolution_ignores_failed_ratings_even_if_levels_are_red_and_green():
+    assert workers_module.requires_resolution(
+        [
+            _risk("red", dimension="equity", status="failed"),
+            _risk("green", dimension="financial", status="failed"),
+        ]
+    ) is False
 
 
 @pytest.mark.asyncio

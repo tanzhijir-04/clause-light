@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 
 from server.core.llm import LLMGateway
 from server.core.schemas.llm_outputs import EvaluationSchema
-from server.core.workers.workers import ClauseRisk
+from server.core.workers.workers import ClauseRisk, detect_conflicts
 
 logger = logging.getLogger(__name__)
 
@@ -69,18 +69,71 @@ def _validate_evaluation(
         return None
 
 
+def _risk_priority(risk: ClauseRisk) -> tuple[int, int]:
+    return (
+        {"red": 3, "yellow": 2, "green": 1}.get(risk.risk_level, 0),
+        risk.severity,
+    )
+
+
+def select_final_risks(clause_risks: list[ClauseRisk]) -> list[ClauseRisk]:
+    """为评分和展示选择结果，同时保留调用方传入的完整历史。"""
+    by_clause: dict[str, list[ClauseRisk]] = defaultdict(list)
+    for risk in clause_risks:
+        if risk.clause_id:
+            by_clause[risk.clause_id].append(risk)
+
+    selected: list[ClauseRisk] = []
+    for risks in by_clause.values():
+        resolutions = [
+            risk
+            for risk in risks
+            if risk.phase == "resolution"
+            and risk.analysis_status == "resolved"
+            and risk.risk_level in {"red", "yellow", "green"}
+        ]
+        candidates = resolutions or [
+            risk
+            for risk in risks
+            if risk.phase == "initial"
+            and risk.analysis_status == "completed"
+            and risk.risk_level in {"red", "yellow", "green"}
+        ]
+        if candidates:
+            selected.append(max(candidates, key=_risk_priority))
+            continue
+
+        selected.append(
+            next(
+                (
+                    risk
+                    for risk in risks
+                    if risk.risk_level == "unknown" or risk.analysis_status == "failed"
+                ),
+                risks[0],
+            )
+        )
+    return selected
+
+
 async def evaluate(
     clause_risks: list[ClauseRisk],
     llm: LLMGateway,
 ) -> EvaluationResult:
     """Filter unreliable Worker results, then aggregate reliable ratings."""
+    final_risks = select_final_risks(clause_risks)
     valid_risks = [
         r
-        for r in clause_risks
+        for r in final_risks
         if r.analysis_status in {"completed", "resolved"}
         and r.risk_level in {"red", "yellow", "green"}
     ]
-    failed_risks = [r for r in clause_risks if r not in valid_risks]
+    failed_risks = [
+        r
+        for r in clause_risks
+        if r.analysis_status not in {"completed", "resolved"}
+        or r.risk_level not in {"red", "yellow", "green"}
+    ]
     failed_clause_ids = {r.clause_id for r in failed_risks if r.clause_id}
     failed_count = len(failed_risks)
 
@@ -92,16 +145,14 @@ async def evaluate(
     result = EvaluationResult()
 
     # ── 1. 一致性检查：仅在可靠结果中检测冲突 ──
-    by_clause: dict[str, list[ClauseRisk]] = defaultdict(list)
-    for r in valid_risks:
-        by_clause[r.clause_id].append(r)
-
-    needs_review: list[str] = []
-    for clause_id, risks in by_clause.items():
-        levels = set(r.risk_level for r in risks)
-        if "red" in levels and "green" in levels:
-            needs_review.append(clause_id)
-            logger.warning("条款 %s 评级冲突: %s", clause_id, levels)
+    needs_review = {
+        r.clause_id for r in clause_risks if r.review_required and r.clause_id
+    }
+    for clause_id, risks in detect_conflicts(clause_risks).items():
+        needs_review.add(clause_id)
+        logger.warning(
+            "条款 %s 评级冲突: %s", clause_id, {risk.risk_level for risk in risks}
+        )
 
     # ── 2. 聚合评分：提示词不携带失败或 unknown 结果 ──
     risk_list_text = "\n".join(
@@ -145,7 +196,12 @@ async def evaluate(
             parsed = None
     validated = _validate_evaluation(parsed)
     if validated is None:
-        return _manual_review_result(valid_risks, failed_clause_ids, failed_count, needs_review)
+        return _manual_review_result(
+            valid_risks,
+            failed_clause_ids,
+            failed_count,
+            sorted(needs_review),
+        )
 
     parsed_data = validated.model_dump()
     result.overall_score = parsed_data["overall_score"]
@@ -178,7 +234,7 @@ async def evaluate(
                 / total
             )
 
-    result.needs_review = sorted(set(needs_review) | failed_clause_ids)
+    result.needs_review = sorted(needs_review | failed_clause_ids)
 
     logger.info(
         "Stage 3 完成: score=%s red=%d yellow=%d green=%d unknown=%d review=%d",

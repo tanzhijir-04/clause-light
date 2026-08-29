@@ -332,6 +332,45 @@ class TestContractAgent:
         }
         assert result.needs_review == ["2"]
 
+    @pytest.mark.asyncio
+    async def test_evaluator_keeps_review_for_conflicts_failures_and_invalid_citations(self):
+        risks = [
+            ClauseRisk(clause_id="1", risk_level="red", dimension="equity"),
+            ClauseRisk(clause_id="1", risk_level="yellow", dimension="financial"),
+            ClauseRisk(
+                clause_id="2",
+                risk_level="green",
+                dimension="general",
+                review_required=True,
+                review_reason="法条引用未通过校验",
+            ),
+            ClauseRisk(
+                clause_id="3",
+                risk_level="unknown",
+                analysis_status="failed",
+                review_required=True,
+            ),
+        ]
+        llm = MagicMock()
+        llm.chat_structured = AsyncMock(
+            return_value=StructuredLLMResponse(
+                content='{"overall_score":60,"recommendation":"negotiate_first",'
+                '"risk_distribution":{"red":1,"yellow":1,"green":1,"unknown":1}}',
+                parsed=None,
+            )
+        )
+        llm.parse_json = MagicMock(
+            return_value={
+                "overall_score": 60,
+                "recommendation": "negotiate_first",
+                "risk_distribution": {"red": 1, "yellow": 1, "green": 1, "unknown": 1},
+            }
+        )
+
+        result = await real_evaluate(risks, llm)
+
+        assert result.needs_review == ["1", "2", "3"]
+
     @patch("server.core.agent.evaluate")
     @patch("server.core.agent.analyze_dimension")
     @patch("server.core.agent.parse_contract")
@@ -372,6 +411,83 @@ class TestContractAgent:
         # 红色条款应有修改建议（来自 Worker 的 suggestion）
         red_clause = [c for c in result.clauses if c.get("risk_level") == "red"]
         assert len(red_clause) == 1
+
+    @patch("server.core.agent.analyze_dimension_with_context")
+    @patch("server.core.agent.evaluate")
+    @patch("server.core.agent.analyze_dimension")
+    @patch("server.core.agent.parse_contract")
+    @patch("server.core.agent.async_session_factory")
+    @patch("server.core.agent.document_ingress.ingest", new_callable=AsyncMock)
+    async def test_conflict_resolution_preserves_initial_history_and_uses_best_dimension(
+        self,
+        mock_ingest,
+        mock_factory,
+        mock_parse,
+        mock_dimension,
+        mock_evaluate,
+        mock_resolve,
+    ):
+        mock_ingest.return_value = _make_doc_result("合同内容")
+        clause = ClauseItem(
+            id="1",
+            type="payment",
+            title="付款",
+            text="验收后付款",
+            relevance=["financial", "equity"],
+        )
+        mock_parse.return_value = _mock_parse_result(clauses=[clause])
+
+        async def _fake_dimension(
+            dim, clauses, llm, contract_type, kb_rules=None, kb_laws=None, memory_context=""
+        ):
+            if dim == "financial":
+                return [
+                    ClauseRisk(
+                        clause_id="1",
+                        risk_level="red",
+                        dimension="financial",
+                        severity=9,
+                    )
+                ]
+            if dim == "equity":
+                return [
+                    ClauseRisk(
+                        clause_id="1",
+                        risk_level="green",
+                        dimension="equity",
+                        severity=1,
+                    )
+                ]
+            return []
+
+        mock_dimension.side_effect = _fake_dimension
+        mock_resolve.return_value = ClauseRisk(
+            clause_id="1",
+            risk_level="yellow",
+            dimension="financial",
+            severity=2,
+        )
+        mock_evaluate.return_value = _mock_eval_result(
+            score=60,
+            red=0,
+            yellow=1,
+            green=0,
+            recommendation="negotiate_first",
+            summary="冲突已复核",
+        )
+        _configure_session(mock_factory)
+
+        result = await self.agent.analyze(file_path="test.pdf")
+
+        assert mock_resolve.call_args.args[0] == "financial"
+        assert len(result.worker_risks) == 3
+        assert {risk["phase"] for risk in result.worker_risks} == {"initial", "resolution"}
+        assert sum(risk["phase"] == "resolution" for risk in result.worker_risks) == 1
+        resolution = next(risk for risk in result.worker_risks if risk["phase"] == "resolution")
+        assert resolution["analysis_status"] == "resolved"
+        assert result.clauses[0]["risk_level"] == "yellow"
+        assert result.clauses[0]["needs_review"] is True
+        assert result.review_reasons["1"]
 
     @patch("server.core.agent.evaluate")
     @patch("server.core.agent.analyze_dimension")
@@ -583,10 +699,10 @@ class TestContractAgent:
         assert scored_risks
         assert all(risk.clause_id == "1" for risk in scored_risks)
         assert all(risk["clause_id"] != "999" for risk in result.worker_risks)
-        assert result.clauses[0]["risk_level"] == "unknown"
+        assert result.clauses[0]["risk_level"] == "red"
         assert result.green_count == 0
-        assert result.analysis_status == "failed"
-        assert result.recommendation == "manual_review"
+        assert result.analysis_status == "partial"
+        assert result.needs_review == ["1"]
 
     @patch("server.core.agent.analyze_dimension_with_context")
     @patch("server.core.agent.evaluate")

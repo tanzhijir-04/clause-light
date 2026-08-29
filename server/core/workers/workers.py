@@ -395,7 +395,7 @@ async def analyze_dimension_with_context(
             dimension,
             f"LLM 返回了非请求条款 id={parsed['clause_id']}",
         )
-        failed.phase = "resolved"
+        failed.phase = "resolution"
         return failed
 
     raw_citations = parsed.get("citation_ids", [])
@@ -428,7 +428,8 @@ async def analyze_dimension_with_context(
         citation_ids=citation_ids,
         review_required=invalid_citations,
         review_reason="法条引用未通过校验" if invalid_citations else "",
-        phase="resolved",
+        analysis_status="resolved",
+        phase="resolution",
     )
 
 
@@ -442,12 +443,27 @@ def detect_conflicts(risks: list[ClauseRisk]) -> dict[str, list[ClauseRisk]]:
 
     by_clause: dict[str, list[ClauseRisk]] = defaultdict(list)
     for r in risks:
-        by_clause[r.clause_id].append(r)
+        if (
+            r.analysis_status in {"completed", "resolved"}
+            and r.risk_level in {"red", "yellow", "green"}
+        ):
+            by_clause[r.clause_id].append(r)
 
     conflicts: dict[str, list[ClauseRisk]] = {}
     for clause_id, clause_risks in by_clause.items():
         levels = set(r.risk_level for r in clause_risks)
-        if "red" in levels and "green" in levels:
+        if len(clause_risks) >= 2 and len(levels) >= 2:
             conflicts[clause_id] = clause_risks
 
     return conflicts
+
+
+def requires_resolution(risks: list[ClauseRisk]) -> bool:
+    """仅红绿跨度才触发第二轮冲突复核。"""
+    levels = {
+        risk.risk_level
+        for risk in risks
+        if risk.analysis_status in {"completed", "resolved"}
+        and risk.risk_level in {"red", "yellow", "green"}
+    }
+    return {"red", "green"}.issubset(levels)

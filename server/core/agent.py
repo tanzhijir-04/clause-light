@@ -12,13 +12,18 @@ from server.core import document_ingress
 from server.core.knowledge import KnowledgeEngine
 from server.core.llm import LLMGateway, get_llm_gateway
 from server.core.ocr import OCREngine, get_ocr_engine
-from server.core.workers.evaluator import EvaluationResult, evaluate
+from server.core.workers.evaluator import (
+    EvaluationResult,
+    evaluate,
+    select_final_risks,
+)
 from server.core.workers.workers import (
     ClauseRisk,
     analyze_dimension,
     analyze_dimension_with_context,
     detect_conflicts,
     failed_clause_risk,
+    requires_resolution,
 )
 from server.core.workers.parser import (
     TYPE_TO_WORKERS,
@@ -356,7 +361,9 @@ class ContractAgent:
                 )
 
         # ── 冲突检测 + 第二轮带上下文分析 ──
-        conflicts = detect_conflicts(all_risks)
+        initial_risks = list(all_risks)
+        resolution_risks: list[ClauseRisk] = []
+        conflicts = detect_conflicts(initial_risks)
         if conflicts:
             logger.info("发现 %d 个冲突条款，启动第二轮分析", len(conflicts))
             await _notify(3, 5, f"发现 {len(conflicts)} 个维度冲突，正在协调...")
@@ -367,6 +374,24 @@ class ContractAgent:
             conflict_tool_budget = 2
 
             for clause_id, conflict_risks in conflicts.items():
+                conflict_reason = (
+                    "同一条款存在多个有效维度评级差异: "
+                    + ", ".join(
+                        f"{risk.dimension}={risk.risk_level}" for risk in conflict_risks
+                    )
+                )
+                for risk in conflict_risks:
+                    risk.review_required = True
+                    if conflict_reason not in risk.review_reason:
+                        risk.review_reason = (
+                            f"{risk.review_reason}; {conflict_reason}"
+                            if risk.review_reason
+                            else conflict_reason
+                        )
+
+                if not requires_resolution(conflict_risks):
+                    continue
+
                 clause = clause_map.get(clause_id)
                 if not clause:
                     continue
@@ -379,9 +404,18 @@ class ContractAgent:
 
                 # 找到评级最高的维度（red > yellow > green）来重新分析
                 risk_priority = {"red": 3, "yellow": 2, "green": 1}
-                best_risk = max(conflict_risks, key=lambda r: risk_priority.get(r.risk_level, 0))
-                # 从 best_risk 的 risk_type 推断维度
-                resolve_dim = "equity"  # 默认用权责对等维度做最终裁决
+                best_risk = max(
+                    conflict_risks,
+                    key=lambda r: (risk_priority.get(r.risk_level, 0), r.severity),
+                )
+                resolve_dim = best_risk.dimension
+                if resolve_dim not in DIMENSIONS:
+                    logger.warning(
+                        "条款 %s 冲突维度无效: %s，跳过冲突复核",
+                        clause_id,
+                        resolve_dim,
+                    )
+                    continue
 
                 # 按需调用 memory/wiki/skill 工具（预算内）
                 conflict_memory = memory_context
@@ -457,26 +491,35 @@ class ContractAgent:
                         resolve_dim,
                         f"冲突解决返回了非请求条款 id={new_risk.clause_id}",
                     )
-                    new_risk.phase = "resolved"
+                    new_risk.phase = "resolution"
 
                 if new_risk:
-                    # 用新结果替换冲突中的旧结果
-                    all_risks = [
-                        r for r in all_risks
-                        if not (r.clause_id == clause_id and r.risk_type == best_risk.risk_type)
-                    ]
-                    all_risks.append(new_risk)
+                    new_risk.phase = "resolution"
+                    if (
+                        new_risk.analysis_status == "completed"
+                        and new_risk.risk_level in {"red", "yellow", "green"}
+                    ):
+                        new_risk.analysis_status = "resolved"
+                    new_risk.review_required = True
+                    new_risk.review_reason = (
+                        f"{new_risk.review_reason}; {conflict_reason}"
+                        if new_risk.review_reason
+                        else conflict_reason
+                    )
+                    resolution_risks.append(new_risk)
                     logger.info(
                         "条款 %s 冲突解决: %s → %s",
                         clause_id, best_risk.risk_level, new_risk.risk_level,
                     )
+
+        all_risks = initial_risks + resolution_risks
 
         # ── Stage 3: 聚合评分 ──
         await _notify(4, 5, "正在聚合评分...")
         logger.info("Stage 3: 聚合评分")
         evaluation_failed = False
         try:
-            eval_result = await evaluate(all_risks, self.llm)
+            eval_result = await evaluate(select_final_risks(all_risks), self.llm)
         except Exception as e:
             logger.warning("Stage 3 失败: %s", e)
             evaluation_failed = True
@@ -566,13 +609,8 @@ class ContractAgent:
         else:
             result.analysis_status = "completed"
 
-        # 组装条款列表（合并解析结果和风险评估结果）
-        # 同一 clause_id + 同一维度只保留 severity 最高的
-        risk_map: dict[str, ClauseRisk] = {}
-        for r in all_risks:
-            key = r.clause_id
-            if key not in risk_map or r.severity > risk_map[key].severity:
-                risk_map[key] = r
+        # 组装条款列表：展示结果可选用 resolution，但 Worker 历史不被覆盖。
+        risk_map = {risk.clause_id: risk for risk in select_final_risks(all_risks)}
 
         for clause in parse_result.clauses:
             risk = risk_map.get(clause.id)
