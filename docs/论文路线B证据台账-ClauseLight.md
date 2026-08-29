@@ -56,6 +56,7 @@
 ```powershell
 @'
 import json
+import os
 import sys
 from collections import Counter
 from pathlib import Path
@@ -85,9 +86,9 @@ with path.open(encoding="utf-8") as handle:
         if record["sample_id"] in sample_ids:
             raise SystemExit(f"line {line_number}: duplicate sample_id")
         sample_ids.add(record["sample_id"])
-        if record["contract_type"] not in contract_types:
+        if not isinstance(record["contract_type"], str) or record["contract_type"] not in contract_types:
             raise SystemExit(f"line {line_number}: contract_type must be rental, labor, or service")
-        if record["source_kind"] not in source_kinds:
+        if not isinstance(record["source_kind"], str) or record["source_kind"] not in source_kinds:
             raise SystemExit(f"line {line_number}: source_kind must be authorized, txt, pdf, or image")
         if not isinstance(record["input_path"], str) or not record["input_path"].strip():
             raise SystemExit(f"line {line_number}: input_path must be non-empty")
@@ -104,6 +105,9 @@ with path.open(encoding="utf-8") as handle:
             raise SystemExit(f"line {line_number}: placeholder input_path is allowed only in example mode")
         if input_path != example_sentinel:
             candidate = Path(input_path).expanduser()
+            lexical = Path(os.path.normpath(str(candidate if candidate.is_absolute() else repo_root / candidate)))
+            if lexical == repo_root or repo_root in lexical.parents:
+                raise SystemExit(f"line {line_number}: input_path must be outside the repository")
             resolved = candidate.resolve() if candidate.is_absolute() else (repo_root / candidate).resolve()
             if resolved == repo_root or repo_root in resolved.parents:
                 raise SystemExit(f"line {line_number}: input_path must be outside the repository")
