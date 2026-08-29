@@ -55,7 +55,8 @@ const ContractDetailPage = {
       this._currentView = 'annotated';
     }
 
-    const scoreClass = contract.score >= 70 ? 'score-green' : contract.score >= 50 ? 'score-yellow' : 'score-red';
+    const hasScore = Number.isFinite(contract.score);
+    const scoreClass = !hasScore ? 'score-unknown' : contract.score >= 70 ? 'score-green' : contract.score >= 50 ? 'score-yellow' : 'score-red';
     const red = contract.redCount || 0;
     const yellow = contract.yellowCount || 0;
     const green = contract.greenCount || 0;
@@ -85,7 +86,7 @@ const ContractDetailPage = {
               <button class="risk-nav-btn" onclick="ContractDetailPage._navigateRisk(1)" id="risk-next">下一条 ${Icons.chevronRight(16)}</button>
             </div>
             ${Components.RiskBadge(contract.riskLevel)}
-            <span class="${scoreClass}" style="font-size:var(--text-2xl);font-weight:700">${contract.score}</span>
+            <span class="${scoreClass}" style="font-size:var(--text-2xl);font-weight:700">${hasScore ? contract.score : '--'}</span>
           </div>
         </div>
         <div style="margin:var(--sp-3) 0">
@@ -201,9 +202,11 @@ const ContractDetailPage = {
       <div class="clause-list">
         ${clauses.map(clause => {
           const riskColor = clause.riskLevel === 'red' ? 'var(--risk-red)' :
-                           clause.riskLevel === 'yellow' ? 'var(--risk-yellow)' : 'var(--risk-green)';
+                           clause.riskLevel === 'yellow' ? 'var(--risk-yellow)' :
+                           clause.riskLevel === 'unknown' ? 'var(--text-tertiary)' : 'var(--risk-green)';
           const riskLabel = clause.riskLevel === 'red' ? '高风险' :
-                           clause.riskLevel === 'yellow' ? '中风险' : '低风险';
+                           clause.riskLevel === 'yellow' ? '中风险' :
+                           clause.riskLevel === 'unknown' ? '需要复核' : '低风险';
           const isActive = this._activeClauseId === clause.id;
           return `
             <div class="clause-item" style="border-left:3px solid ${riskColor};padding:var(--sp-4);margin-bottom:var(--sp-3);background:var(--bg-surface);border-radius:0 var(--radius-sm) var(--radius-sm) 0;cursor:pointer;transition:all .15s;${isActive ? 'box-shadow:0 0 0 2px var(--accent);' : ''}"
@@ -225,6 +228,7 @@ const ContractDetailPage = {
                   法律依据：${Components.escapeHtml(clause.legalBasis)}
                 </div>
               ` : ''}
+              ${clause.needsReview ? `<div class="review-warning">需要人工复核：${Components.escapeHtml(clause.reviewReason || '系统未形成可靠判断')}</div>` : ''}
             </div>
           `;
         }).join('')}
@@ -298,6 +302,17 @@ const ContractDetailPage = {
 
   /** 定位条款在原文中的位置 */
   _locateClause(fullText, clause) {
+    const hasPersistedLocation = Object.prototype.hasOwnProperty.call(clause, 'sourceStart') || Object.prototype.hasOwnProperty.call(clause, 'sourceEnd');
+    if (hasPersistedLocation) {
+      if (Number.isInteger(clause.sourceStart) && Number.isInteger(clause.sourceEnd) && clause.sourceStart >= 0 && clause.sourceEnd > clause.sourceStart && clause.sourceEnd <= fullText.length) {
+        return { start: clause.sourceStart, end: clause.sourceEnd };
+      }
+      // -1/-1 is the migration sentinel for legacy rows, which may still use
+      // the historical heuristic. A new failed location is review-marked and
+      // must not create a speculative highlight.
+      const isLegacySentinel = clause.sourceStart === -1 && clause.sourceEnd === -1 && !clause.needsReview && clause.analysisStatus === 'completed';
+      if (!isLegacySentinel) return null;
+    }
     // 策略1：clauseNumber + clauseTitle 组合搜索（标准化后换行变空格）
     if (clause.clauseNumber && clause.clauseTitle) {
       const anchors = [
@@ -434,6 +449,22 @@ const ContractDetailPage = {
           <div class="anno-section-title">法律依据</div>
           <div class="anno-section-content legal">${Components.escapeHtml(clause.legalBasis)}</div>
         </div>`;
+    }
+
+    const citations = Array.isArray(clause.legalCitations) ? clause.legalCitations : [];
+    sections += `
+      <div class="anno-section">
+        <div class="anno-section-title">法条来源</div>
+        ${citations.length ? citations.map(ref => `<div class="legal-citation"><div>${Components.escapeHtml(ref.lawName)} ${Components.escapeHtml(ref.articleNumber)}</div><div>${Components.escapeHtml((ref.content || '').slice(0, 160))}</div><small>核验时间：${Components.escapeHtml(ref.verifiedAt || '未记录')}</small>${ref.sourceUrl ? ` <a href="${Components.escapeHtml(ref.sourceUrl)}" target="_blank" rel="noopener noreferrer">查看权威来源</a>` : ''}</div>`).join('') : '<div class="anno-section-content">未关联已核验法条，不能据此作为法律结论</div>'}
+      </div>`;
+
+    const workers = Array.isArray(clause.workerResults) ? clause.workerResults : [];
+    if (workers.length) {
+      sections += `<details class="worker-trace"><summary>Worker 轨迹（${workers.length} 条）</summary>${workers.map(worker => `<div class="worker-trace-row"><strong>${Components.escapeHtml(worker.dimension)} · ${Components.escapeHtml(worker.phase)}</strong><span>${Components.escapeHtml(worker.riskLevel || 'unknown')}</span>${worker.needsReview ? `<div>复核：${Components.escapeHtml(worker.reviewReason || '需要人工复核')}</div>` : ''}</div>`).join('')}</details>`;
+    }
+
+    if (clause.needsReview && clause.analysisStatus === 'failed' && !clause.riskSummary) {
+      sections += '<div class="anno-section"><div class="anno-section-content">系统未形成判断，请人工复核</div></div>';
     }
 
     // 修改建议

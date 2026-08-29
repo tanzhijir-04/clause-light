@@ -23,6 +23,7 @@ from server.models.database import (
     AsyncSession,
     ClauseAnalysis,
     Contract,
+    LegalReference,
     WorkerRiskResult,
     async_session_factory,
     get_db,
@@ -67,11 +68,12 @@ async def list_contracts(
             red = sum(1 for cl in clauses if cl.risk_level == "red")
             yellow = sum(1 for cl in clauses if cl.risk_level == "yellow")
             green = sum(1 for cl in clauses if cl.risk_level == "green")
+            unknown = sum(1 for cl in clauses if (cl.risk_level or "unknown") == "unknown")
             score = analysis.overall_score or 0
             model = analysis.model_used or ""
             rec = analysis.recommendation or "negotiate_first"
         else:
-            red = yellow = green = 0
+            red = yellow = green = unknown = 0
             score = 0
             model = ""
             rec = "negotiate_first"
@@ -81,6 +83,8 @@ async def list_contracts(
             risk_level = "red"
         elif yellow > 0:
             risk_level = "yellow"
+        elif unknown > 0:
+            risk_level = "unknown"
         else:
             risk_level = "green"
 
@@ -94,6 +98,7 @@ async def list_contracts(
             "redCount": red,
             "yellowCount": yellow,
             "greenCount": green,
+            "unknownCount": unknown,
             "createdAt": c.created_at.strftime("%Y-%m-%d") if c.created_at else "",
             "status": "analyzed" if analysis else "pending",
             "model": model,
@@ -117,77 +122,124 @@ async def get_contract(
     contract_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """合同详情 + 分析结果"""
-    stmt = select(Contract).where(Contract.id == contract_id)
-    result = await db.execute(stmt)
+    """合同详情 + 分析结果，法条和 Worker 轨迹按分析批量加载。"""
+    result = await db.execute(select(Contract).where(Contract.id == contract_id))
     contract = result.scalar_one_or_none()
     if not contract:
         raise HTTPException(status_code=404, detail="合同不存在")
 
-    # 获取最新分析
-    analysis_stmt = (
+    analysis_result = await db.execute(
         select(Analysis)
         .where(Analysis.contract_id == contract_id)
         .order_by(Analysis.created_at.desc())
         .limit(1)
     )
-    analysis_result = await db.execute(analysis_stmt)
     analysis = analysis_result.scalar_one_or_none()
-
-    # 获取条款分析
-    clauses_data = []
-    red = yellow = green = 0
+    clauses = []
+    worker_by_clause: dict[str, list[dict]] = {}
+    refs_by_id = {}
     if analysis:
-        clause_stmt = (
+        clause_result = await db.execute(
             select(ClauseAnalysis).where(ClauseAnalysis.analysis_id == analysis.id)
         )
-        clause_result = await db.execute(clause_stmt)
         clauses = clause_result.scalars().all()
-        for cl in clauses:
-            clauses_data.append({
-                "id": cl.id,
-                "clauseNumber": cl.clause_number or "",
-                "clauseTitle": cl.clause_title or "",
-                "clauseContent": cl.clause_content or "",
-                "riskLevel": cl.risk_level or "green",
-                "riskType": cl.risk_type or "",
-                "riskSummary": cl.risk_summary or "",
-                "plainExplanation": cl.plain_explanation or "",
-                "legalBasis": cl.legal_basis or "",
-                "severityScore": cl.severity_score or 0,
-                "suggestedClause": cl.suggested_clause or "",
-                "canNegotiate": cl.can_negotiate or False,
-                "userFeedback": cl.user_feedback,
+        worker_result = await db.execute(
+            select(WorkerRiskResult).where(WorkerRiskResult.analysis_id == analysis.id)
+        )
+        for worker in worker_result.scalars().all():
+            worker_by_clause.setdefault(worker.clause_number or "", []).append({
+                "dimension": worker.dimension,
+                "phase": worker.phase,
+                "riskLevel": worker.risk_level or "unknown",
+                "riskType": worker.risk_type or "",
+                "issue": worker.issue or "",
+                "severityScore": worker.severity_score,
+                "analysisStatus": worker.analysis_status or "completed",
+                "needsReview": bool(worker.review_required),
+                "reviewReason": worker.review_reason or "",
             })
-            if cl.risk_level == "red":
-                red += 1
-            elif cl.risk_level == "yellow":
-                yellow += 1
-            else:
-                green += 1
+        citation_ids = set()
+        for clause in clauses:
+            try:
+                values = json.loads(clause.citation_ids or "[]")
+            except (json.JSONDecodeError, TypeError):
+                values = []
+            citation_ids.update(value for value in values if isinstance(value, str))
+        if citation_ids:
+            refs = await db.execute(select(LegalReference).where(LegalReference.id.in_(citation_ids)))
+            refs_by_id = {ref.id: ref for ref in refs.scalars().all()}
 
-    # 从 raw_result 透出记忆 session_id（旧数据无此字段则空串）
+    clauses_data = []
+    red = yellow = green = 0
+    for clause in clauses:
+        try:
+            citation_values = json.loads(clause.citation_ids or "[]")
+        except (json.JSONDecodeError, TypeError):
+            citation_values = []
+        legal_citations = []
+        for citation_id in citation_values if isinstance(citation_values, list) else []:
+            ref = refs_by_id.get(citation_id)
+            if ref:
+                legal_citations.append({
+                    "id": ref.id,
+                    "lawName": ref.law_name,
+                    "articleNumber": ref.article_number or "",
+                    "content": ref.content or "",
+                    "sourceUrl": ref.source_url,
+                    "verifiedAt": ref.verified_at.isoformat() if ref.verified_at else None,
+                })
+        level = clause.risk_level or "unknown"
+        if level == "red": red += 1
+        elif level == "yellow": yellow += 1
+        elif level == "green": green += 1
+        clauses_data.append({
+            "id": clause.id,
+            "clauseNumber": clause.clause_number or "",
+            "clauseTitle": clause.clause_title or "",
+            "clauseContent": clause.clause_content or "",
+            "riskLevel": level,
+            "riskType": clause.risk_type or "",
+            "riskSummary": clause.risk_summary or "",
+            "plainExplanation": clause.plain_explanation or "",
+            "legalBasis": clause.legal_basis or "",
+            "severityScore": clause.severity_score or 0,
+            "suggestedClause": clause.suggested_clause or "",
+            "canNegotiate": clause.can_negotiate or False,
+            "userFeedback": clause.user_feedback,
+            "analysisStatus": clause.analysis_status or "completed",
+            "needsReview": bool(clause.review_required),
+            "reviewReason": clause.review_reason or "",
+            "sourceStart": clause.source_start,
+            "sourceEnd": clause.source_end,
+            "legalCitations": legal_citations,
+            "workerResults": worker_by_clause.get(clause.clause_number or "", []),
+        })
+
     session_id = ""
     if analysis and analysis.raw_result:
         try:
             raw = json.loads(analysis.raw_result)
-            if isinstance(raw, dict):
-                sid = raw.get("session_id") or ""
-                if isinstance(sid, str):
-                    session_id = sid
+            session_id = raw.get("session_id", "") if isinstance(raw, dict) else ""
         except (json.JSONDecodeError, TypeError):
             pass
-
+    review_reasons = {}
+    if analysis and analysis.review_reason:
+        try:
+            parsed = json.loads(analysis.review_reason)
+            review_reasons = parsed if isinstance(parsed, dict) else {"analysis": [analysis.review_reason]}
+        except (json.JSONDecodeError, TypeError):
+            review_reasons = {"analysis": [analysis.review_reason]}
+    unknown_count = sum(1 for clause in clauses_data if clause["riskLevel"] == "unknown")
+    needs_review = bool(analysis and analysis.review_required) or any(c["needsReview"] for c in clauses_data)
     return {
         "id": contract.id,
         "title": contract.title or "未命名合同",
         "type": contract.type or "其他",
         "typeEn": TYPE_EN_MAP.get(contract.type, "other"),
-        "score": analysis.overall_score if analysis else 0,
-        "riskLevel": "red" if red > 0 else ("yellow" if yellow > 0 else "green"),
-        "redCount": red,
-        "yellowCount": yellow,
-        "greenCount": green,
+        "score": analysis.overall_score if analysis else None,
+        "riskLevel": "red" if red else ("yellow" if yellow else ("unknown" if unknown_count else "green")),
+        "redCount": red, "yellowCount": yellow, "greenCount": green,
+        "unknownCount": unknown_count,
         "createdAt": contract.created_at.strftime("%Y-%m-%d") if contract.created_at else "",
         "status": "analyzed" if analysis else "pending",
         "model": analysis.model_used if analysis else "",
@@ -195,6 +247,10 @@ async def get_contract(
         "recommendation": analysis.recommendation if analysis else "",
         "fullText": contract.ocr_text or "",
         "sessionId": session_id,
+        "analysisStatus": analysis.status if analysis else "pending",
+        "needsReview": needs_review,
+        "reviewReasons": review_reasons,
+        "processingMode": analysis.processing_mode if analysis else None,
         "clauses": clauses_data,
     }
 

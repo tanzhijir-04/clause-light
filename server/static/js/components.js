@@ -17,7 +17,7 @@ const Components = (() => {
 
   /** 风险徽章 */
   function RiskBadge(level, label) {
-    const labels = { red: '高风险', yellow: '中风险', green: '低风险' };
+    const labels = { red: '高风险', yellow: '中风险', green: '低风险', unknown: '需要复核' };
     return `<span class="risk-badge ${escapeHtml(level)}"><span class="risk-dot ${escapeHtml(level)}"></span>${escapeHtml(label || labels[level] || level)}</span>`;
   }
 

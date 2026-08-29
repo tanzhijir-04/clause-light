@@ -76,6 +76,12 @@ def main():
                 screenshot(page, "04_annotated")
                 marks = page.locator(".clause-mark")
                 log_test("原文标注", "pass" if marks.count() > 0 else "fail", f"{marks.count()}个高亮")
+                unknown_marks = page.locator(".clause-mark.unknown")
+                if unknown_marks.count() > 0:
+                    log_test("unknown 不显示为绿色", "pass" if page.locator(".clause-mark.unknown.green").count() == 0 else "fail")
+                source_links = page.locator(".legal-citation a")
+                if source_links.count() > 0:
+                    log_test("法条来源链接", "pass" if all(source_links.nth(i).get_attribute("href") for i in range(source_links.count())) else "fail")
 
                 # 点击高亮
                 if marks.count() > 0:

@@ -93,6 +93,7 @@
 .risk-badge.red { background: var(--risk-red-bg); color: var(--risk-red-text); border: 1px solid var(--risk-red-border); }
 .risk-badge.yellow { background: var(--risk-yellow-bg); color: var(--risk-yellow-text); border: 1px solid var(--risk-yellow-border); }
 .risk-badge.green { background: var(--risk-green-bg); color: var(--risk-green-text); border: 1px solid var(--risk-green-border); }
+.risk-badge.unknown { background: repeating-linear-gradient(135deg, var(--bg-surface) 0 4px, var(--border-subtle) 4px 8px); color: var(--text-secondary); border: 1px dashed var(--text-tertiary); }
 
 .risk-dot {
   width: 6px;
@@ -102,6 +103,13 @@
 .risk-dot.red { background: var(--risk-red); }
 .risk-dot.yellow { background: var(--risk-yellow); }
 .risk-dot.green { background: var(--risk-green); }
+.risk-dot.unknown { background: var(--text-tertiary); }
+
+.review-warning { margin-top: var(--sp-2); padding: var(--sp-2); border: 1px dashed var(--text-tertiary); color: var(--text-secondary); font-size: var(--text-xs); }
+.legal-citation { margin-top: var(--sp-2); padding: var(--sp-2); border-left: 2px solid var(--accent); font-size: var(--text-xs); color: var(--text-secondary); }
+.legal-citation a { color: var(--accent); }
+.worker-trace { margin-top: var(--sp-3); font-size: var(--text-xs); }
+.worker-trace-row { padding: var(--sp-2) 0; border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); }
 
 /* ---- 风险分布条 ---- */
 .risk-dist-bar {
