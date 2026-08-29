@@ -103,6 +103,7 @@ class ContractAgent:
         contract_id = uuid.uuid4().hex
 
         def _pipeline_failure(message: str) -> AnalysisResult:
+            result.contract_id = contract_id
             result.error = message
             result.recommendation = "manual_review"
             result.summary = "系统未形成可用分析，请人工复核"

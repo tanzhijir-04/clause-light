@@ -13,7 +13,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
-from server.models.database import Analysis, ClauseAnalysis, Contract, get_db
+from server.models.database import Analysis, ClauseAnalysis, Contract, WorkerRiskResult, get_db
 
 
 @pytest_asyncio.fixture
@@ -306,8 +306,34 @@ class TestPersistAnalysisResult:
                     "severity_score": 8,
                     "suggested_clause": "建议调整",
                     "can_negotiate": True,
+                    "analysis_status": "completed",
+                    "needs_review": False,
+                    "review_reason": "",
+                    "source_start": 0,
+                    "source_end": 13,
+                    "citation_ids": ["law-1"],
                 }
             ],
+            analysis_status="completed",
+            review_reasons={},
+            processing_mode="parallel",
+            worker_risks=[{
+                "clause_id": "第一条",
+                "dimension": "financial",
+                "phase": "initial",
+                "risk_level": "red",
+                "risk_type": "违约金过高",
+                "issue": "比例偏高",
+                "unfavorable_to": "乙方",
+                "severity": 8,
+                "suggestion": "建议调整",
+                "legal_basis": "",
+                "citation_ids": ["law-1"],
+                "analysis_status": "completed",
+                "failure_reason": "",
+                "review_required": False,
+                "review_reason": "",
+            }],
             session_id="mem_session_1",
             error="",
         )
@@ -331,6 +357,14 @@ class TestPersistAnalysisResult:
         assert len(clauses) == 1
         assert clauses[0].risk_level == "red"
         assert clauses[0].severity_score == 8
+        worker_rows = (
+            await db_session.execute(
+                select(WorkerRiskResult).where(WorkerRiskResult.analysis_id == "persist_analysis")
+            )
+        ).scalars().all()
+        assert len(worker_rows) == 1
+        assert worker_rows[0].phase == "initial"
+        assert worker_rows[0].citation_ids == '["law-1"]'
 
         refreshed = await db_session.get(Contract, "persist_contract")
         await db_session.refresh(refreshed)
@@ -526,7 +560,16 @@ class TestDeleteContract:
             clause_content="条款二内容",
             risk_level="green",
         )
-        db_session.add_all([contract, analysis, clause1, clause2])
+        worker = WorkerRiskResult(
+            id="cascade_worker",
+            analysis_id="cascade_analysis",
+            clause_number="第一条",
+            dimension="financial",
+            phase="initial",
+            risk_level="unknown",
+            analysis_status="failed",
+        )
+        db_session.add_all([contract, analysis, clause1, clause2, worker])
         await db_session.commit()
 
         response = await client.delete("/api/contracts/cascade_contract")
@@ -541,6 +584,10 @@ class TestDeleteContract:
         clause_stmt = select(ClauseAnalysis).where(ClauseAnalysis.analysis_id == "cascade_analysis")
         clause_result = await db_session.execute(clause_stmt)
         assert clause_result.scalars().all() == []
+
+        worker_stmt = select(WorkerRiskResult).where(WorkerRiskResult.analysis_id == "cascade_analysis")
+        worker_result = await db_session.execute(worker_stmt)
+        assert worker_result.scalars().all() == []
 
     async def test_delete_source_file_cleanup(self, client, db_session, tmp_path):
         """测试删除时清理源文件"""

@@ -23,6 +23,7 @@ from server.models.database import (
     AsyncSession,
     ClauseAnalysis,
     Contract,
+    WorkerRiskResult,
     async_session_factory,
     get_db,
 )
@@ -213,6 +214,19 @@ async def persist_analysis_result(
 
     try:
         async with session_factory() as session:
+            analysis_status = getattr(result, "analysis_status", "completed")
+            if not isinstance(analysis_status, str) or not analysis_status:
+                analysis_status = "completed"
+            review_reasons = getattr(result, "review_reasons", {})
+            if not isinstance(review_reasons, dict):
+                review_reasons = {}
+            processing_mode = getattr(result, "processing_mode", "local")
+            if not isinstance(processing_mode, str) or not processing_mode:
+                processing_mode = "local"
+            worker_risks = getattr(result, "worker_risks", [])
+            if not isinstance(worker_risks, list):
+                worker_risks = []
+
             # 更新合同记录
             await session.execute(
                 sa_update(Contract)
@@ -243,6 +257,12 @@ async def persist_analysis_result(
                         ensure_ascii=False,
                     ),
                     source="local",
+                    status=analysis_status,
+                    review_required=bool(review_reasons),
+                    review_reason=json.dumps(
+                        review_reasons, ensure_ascii=False
+                    ),
+                    processing_mode=processing_mode,
                 )
                 session.add(analysis)
 
@@ -261,8 +281,39 @@ async def persist_analysis_result(
                         severity_score=clause.get("severity_score", 1),
                         suggested_clause=clause.get("suggested_clause", ""),
                         can_negotiate=clause.get("can_negotiate", False),
+                        analysis_status=clause.get("analysis_status", "completed"),
+                        review_required=clause.get("needs_review", False),
+                        review_reason=clause.get("review_reason", ""),
+                        source_start=clause.get("source_start", -1),
+                        source_end=clause.get("source_end", -1),
+                        citation_ids=json.dumps(
+                            clause.get("citation_ids", []), ensure_ascii=False
+                        ),
                     )
                     session.add(clause_analysis)
+
+                for worker in worker_risks:
+                    session.add(WorkerRiskResult(
+                        id=uuid.uuid4().hex,
+                        analysis_id=analysis.id,
+                        clause_number=worker.get("clause_id", ""),
+                        dimension=worker.get("dimension", "general"),
+                        phase=worker.get("phase", "initial"),
+                        risk_level=worker.get("risk_level"),
+                        risk_type=worker.get("risk_type", ""),
+                        issue=worker.get("issue", ""),
+                        unfavorable_to=worker.get("unfavorable_to", ""),
+                        severity_score=worker.get("severity"),
+                        suggestion=worker.get("suggestion", ""),
+                        legal_basis=worker.get("legal_basis", ""),
+                        citation_ids=json.dumps(
+                            worker.get("citation_ids", []), ensure_ascii=False
+                        ),
+                        analysis_status=worker.get("analysis_status", "completed"),
+                        failure_reason=worker.get("failure_reason", ""),
+                        review_required=worker.get("review_required", False),
+                        review_reason=worker.get("review_reason", ""),
+                    ))
 
             await session.commit()
         return None
@@ -365,7 +416,7 @@ async def analyze_contract(
                     on_step=on_progress,
                 )
                 # 保存结果在后台任务内完成，客户端断开也不丢失
-                if not getattr(result, "error", ""):
+                if getattr(result, "contract_id", ""):
                     save_error = await persist_analysis_result(contract_id, result)
                     if save_error:
                         result.error = save_error
@@ -496,23 +547,29 @@ async def delete_contract(
     analysis_result = await db.execute(analysis_stmt)
     analysis_ids = [row[0] for row in analysis_result.all()]
 
-    # 1. 删除条款分析（依赖 analysis_id）
+    # 1. 删除 Worker 轨迹（依赖 analysis_id）
+    if analysis_ids:
+        await db.execute(
+            delete(WorkerRiskResult).where(WorkerRiskResult.analysis_id.in_(analysis_ids))
+        )
+
+    # 2. 删除条款分析（依赖 analysis_id）
     if analysis_ids:
         await db.execute(
             delete(ClauseAnalysis).where(ClauseAnalysis.analysis_id.in_(analysis_ids))
         )
 
-    # 2. 删除分析记录（依赖 contract_id）
+    # 3. 删除分析记录（依赖 contract_id）
     await db.execute(
         delete(Analysis).where(Analysis.contract_id == contract_id)
     )
 
-    # 3. 删除合同记录
+    # 4. 删除合同记录
     await db.execute(
         delete(Contract).where(Contract.id == contract_id)
     )
 
-    # 4. 删除上传的源文件（如果存在）
+    # 5. 删除上传的源文件（如果存在）
     if contract.source_file and os.path.exists(contract.source_file):
         try:
             os.remove(contract.source_file)

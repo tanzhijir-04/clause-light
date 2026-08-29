@@ -66,6 +66,10 @@ class Analysis(Base):
     recommendation = Column(String, nullable=True)  # sign / negotiate_first / reject
     raw_result = Column(Text, nullable=True)  # JSON 字符串
     source = Column(String, nullable=True)  # local / cloud / remote_pc
+    status = Column(String, default="completed")
+    review_required = Column(Boolean, default=False)
+    review_reason = Column(Text, nullable=True)
+    processing_mode = Column(String, nullable=True)  # local / remote
     created_at = Column(DateTime, default=func.now())
 
 
@@ -88,6 +92,12 @@ class ClauseAnalysis(Base):
     suggested_clause = Column(Text, nullable=True)
     can_negotiate = Column(Boolean, default=False)
     user_feedback = Column(String, nullable=True)  # correct / incorrect / null
+    analysis_status = Column(String, default="completed")
+    review_required = Column(Boolean, default=False)
+    review_reason = Column(Text, nullable=True)
+    source_start = Column(Integer, default=-1)
+    source_end = Column(Integer, default=-1)
+    citation_ids = Column(Text, nullable=True)  # JSON list
     created_at = Column(DateTime, default=func.now())
 
 
@@ -126,6 +136,31 @@ class LegalReference(Base):
     source_url = Column(Text, nullable=True)
     verified_at = Column(DateTime, nullable=True)
     tags = Column(Text, nullable=True)  # JSON 字符串
+
+
+class WorkerRiskResult(Base):
+    """不可变的 Worker 输出轨迹；冲突复核以新行追加。"""
+
+    __tablename__ = "worker_risk_results"
+
+    id = Column(String, primary_key=True, default=lambda: uuid.uuid4().hex)
+    analysis_id = Column(String, nullable=False, index=True)
+    clause_number = Column(String, nullable=True, index=True)
+    dimension = Column(String, nullable=False)
+    phase = Column(String, nullable=False, default="initial")
+    risk_level = Column(String, nullable=True)
+    risk_type = Column(String, nullable=True)
+    issue = Column(Text, nullable=True)
+    unfavorable_to = Column(String, nullable=True)
+    severity_score = Column(Integer, nullable=True)
+    suggestion = Column(Text, nullable=True)
+    legal_basis = Column(Text, nullable=True)
+    citation_ids = Column(Text, nullable=True)
+    analysis_status = Column(String, nullable=True)
+    failure_reason = Column(Text, nullable=True)
+    review_required = Column(Boolean, default=False)
+    review_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=func.now())
 
 
 class SyncLog(Base):
@@ -318,6 +353,20 @@ async def init_db() -> None:
 
 # 新分支在已有表上新增的列（create_all 不会修改已有表，需手动 ALTER）
 _LEGACY_COLUMN_MIGRATIONS: dict[str, list[tuple[str, str, object | None]]] = {
+    "analyses": [
+        ("status", "VARCHAR", "completed"),
+        ("review_required", "BOOLEAN", False),
+        ("review_reason", "TEXT", None),
+        ("processing_mode", "VARCHAR", None),
+    ],
+    "clause_analyses": [
+        ("analysis_status", "VARCHAR", "completed"),
+        ("review_required", "BOOLEAN", False),
+        ("review_reason", "TEXT", None),
+        ("source_start", "INTEGER", -1),
+        ("source_end", "INTEGER", -1),
+        ("citation_ids", "TEXT", None),
+    ],
     "knowledge_rules": [("status", "VARCHAR", "active")],
     "legal_references": [
         ("source_url", "TEXT", None),

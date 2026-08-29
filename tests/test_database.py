@@ -15,6 +15,8 @@ from server.models.database import (
     SyncLog,
     async_session_factory,
     migrate_schema,
+    Base,
+    WorkerRiskResult,
 )
 
 
@@ -247,6 +249,33 @@ class TestSchemaMigration:
                 }
             assert columns["source_url"] is None
             assert columns["verified_at"] is None
+        finally:
+            await engine.dispose()
+
+    async def test_migrate_adds_analysis_trace_fields_and_worker_table(self, tmp_path):
+        db_file = tmp_path / "legacy-analysis.db"
+        engine = create_async_engine(f"sqlite+aiosqlite:///{db_file.as_posix()}")
+        async with engine.begin() as conn:
+            await conn.execute(text("CREATE TABLE analyses (id VARCHAR PRIMARY KEY, contract_id VARCHAR NOT NULL)"))
+            await conn.execute(text("CREATE TABLE clause_analyses (id VARCHAR PRIMARY KEY, analysis_id VARCHAR NOT NULL)"))
+            await conn.execute(text("CREATE TABLE legal_references (id VARCHAR PRIMARY KEY, law_name VARCHAR NOT NULL)"))
+            await conn.execute(text("INSERT INTO analyses (id, contract_id) VALUES ('a1', 'c1')"))
+            await conn.execute(text("INSERT INTO clause_analyses (id, analysis_id) VALUES ('cl1', 'a1')"))
+            await conn.run_sync(Base.metadata.create_all)
+        try:
+            await migrate_schema(engine)
+            await migrate_schema(engine)
+            async with engine.connect() as conn:
+                analysis_columns = {row[1] for row in (await conn.execute(text("PRAGMA table_info(analyses)"))).fetchall()}
+                clause_columns = {row[1] for row in (await conn.execute(text("PRAGMA table_info(clause_analyses)"))).fetchall()}
+                analysis_row = (await conn.execute(text("SELECT status FROM analyses WHERE id='a1'"))).scalar_one()
+                clause_row = (await conn.execute(text("SELECT analysis_status, review_required FROM clause_analyses WHERE id='cl1'"))).one()
+                tables = {row[0] for row in (await conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))).fetchall()}
+            assert {"status", "review_required", "review_reason", "processing_mode"} <= analysis_columns
+            assert {"analysis_status", "review_required", "review_reason", "source_start", "source_end", "citation_ids"} <= clause_columns
+            assert analysis_row == "completed"
+            assert clause_row == ("completed", 0)
+            assert "worker_risk_results" in tables
         finally:
             await engine.dispose()
 
