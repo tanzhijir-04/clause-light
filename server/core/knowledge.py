@@ -425,9 +425,13 @@ class KnowledgeEngine:
 
         return [
             {
+                "id": ref.id,
                 "law_name": ref.law_name,
                 "article_number": ref.article_number,
                 "content": ref.content,
+                "effective_date": ref.effective_date.isoformat() if ref.effective_date else None,
+                "source_url": ref.source_url,
+                "verified_at": ref.verified_at.isoformat() if ref.verified_at else None,
             }
             for ref, _ in scored[:top_k]
         ]

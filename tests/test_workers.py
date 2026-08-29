@@ -117,3 +117,59 @@ async def test_second_pass_foreign_clause_id_is_failed_for_requested_clause():
     assert result.risk_level == "unknown"
     assert result.analysis_status == "failed"
     assert result.review_required is True
+
+
+@pytest.mark.asyncio
+async def test_worker_filters_citations_to_current_law_whitelist():
+    llm = MagicMock()
+    llm.chat_structured = AsyncMock(return_value=StructuredLLMResponse(
+        content='{"risks":[{"clause_id":"1","risk_level":"yellow",'
+        '"legal_basis":"自由文本依据","citation_ids":["law-1","forged-law"]}]}',
+        parsed=None,
+    ))
+    llm.parse_json = MagicMock(return_value={
+        "risks": [{
+            "clause_id": "1",
+            "risk_level": "yellow",
+            "legal_basis": "自由文本依据",
+            "citation_ids": ["law-1", "forged-law"],
+        }]
+    })
+
+    results = await analyze_dimension(
+        "financial",
+        [_clause()],
+        llm,
+        "服务合同",
+        kb_laws=[{"id": "law-1", "law_name": "民法典", "content": "违约金"}],
+    )
+
+    assert results[0].citation_ids == ["law-1"]
+    assert results[0].legal_basis == "自由文本依据"
+    assert results[0].review_required is True
+    assert results[0].review_reason == "法条引用未通过校验"
+
+
+@pytest.mark.asyncio
+async def test_worker_does_not_treat_legal_basis_as_citation():
+    llm = MagicMock()
+    llm.chat_structured = AsyncMock(return_value=StructuredLLMResponse(
+        content='{"risks":[{"clause_id":"1","risk_level":"green",'
+        '"legal_basis":"《民法典》第五百八十五条"}]}',
+        parsed=None,
+    ))
+    llm.parse_json = MagicMock(return_value={
+        "risks": [{
+            "clause_id": "1",
+            "risk_level": "green",
+            "legal_basis": "《民法典》第五百八十五条",
+        }]
+    })
+
+    result = (await analyze_dimension(
+        "financial", [_clause()], llm, "服务合同", kb_laws=[]
+    ))[0]
+
+    assert result.citation_ids == []
+    assert result.legal_basis
+    assert result.review_required is False

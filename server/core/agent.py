@@ -173,6 +173,7 @@ class ContractAgent:
         # ── 知识库检索（超时降级） ──
         kb_rules: list[str] = []
         kb_laws: list[dict] = []
+        laws_by_clause: dict[str, list[dict]] = {}
 
         # 设置 embedding 下载进度回调（首次下载时显示进度）
         from server.core import embedding
@@ -205,10 +206,25 @@ class ContractAgent:
                     knowledge.search(full_text[:500], parse_result.contract_type),
                     timeout=60.0,  # 60 秒超时（给模型下载更多时间）
                 )
-                kb_laws = await asyncio.wait_for(
-                    knowledge.search_laws(full_text[:500], parse_result.contract_type),
-                    timeout=10.0,
-                )
+                # 法条检索按条款串行执行：同一个 AsyncSession 不并发使用。
+                for clause in parse_result.clauses:
+                    try:
+                        laws = await asyncio.wait_for(
+                            knowledge.search_laws(
+                                clause.text,
+                                parse_result.contract_type,
+                                top_k=3,
+                            ),
+                            timeout=10.0,
+                        )
+                    except Exception as exc:
+                        logger.warning("条款法条检索失败 clause=%s: %s", clause.id, exc)
+                        laws = []
+                    laws_by_clause[clause.id] = laws
+                    clause.law_references = laws
+                    for law in laws:
+                        if law.get("id") not in {item.get("id") for item in kb_laws}:
+                            kb_laws.append(law)
         except asyncio.TimeoutError:
             logger.warning("知识库检索超时（60s），跳过知识库增强，继续分析")
         except Exception as e:
@@ -424,7 +440,7 @@ class ContractAgent:
                         parse_result.contract_type,
                         cross_context,
                         kb_rules,
-                        kb_laws,
+                        clause.law_references or [],
                         memory_context=conflict_memory,
                     )
                 except Exception as exc:

@@ -152,6 +152,15 @@ print(f"valid: {path} ({len(groups)} independent groups)")
 | `RUN-<date>-<id>` | RUN | 脱敏实验聚合结果、配置摘要和样本计数 | 每次运行追加真实 ID；不得包含合同正文/个人信息 |
 | `HUMAN-<id>` | HUMAN | 未来法律专家 gold label 或独立复核 | 当前不存在；法律准确率未评估 |
 
+### 法规来源映射（Task 4）
+
+| Evidence ID | 内置文件 | 权威全文来源 | `verified_at` | 核验说明 |
+|---|---|---|---|---|
+| `LAW-SOURCE-001` | `shared/laws/civil_code.json` | [国家法律法规数据库：民法典全文 PDF](https://wb.flk.npc.gov.cn/flfg/PDF/bd53dd912c1048f2aecbaa229238334b.pdf) | `2026-08-29` | 逐条保留法名、条号和原文；工程实现核对，非法律专家 gold label |
+| `LAW-SOURCE-002` | `shared/laws/labor_law.json` | [人力资源和社会保障部：劳动合同法全文](https://www.mohrss.gov.cn/xxgk2020/fdzdgknr/zcfg/fl/202011/t20201102_394622_wap.html) | `2026-08-29` | 逐条保留法名、条号和原文；工程实现核对，非法律专家 gold label |
+
+以上映射仅证明内置资料具有可追溯来源，不证明内容自动更新、法律结论正确或系统具备法律准确率。`citation_ids` 只有在数据库检索结果白名单内时才可关联到上述来源。
+
 ## 已执行与后续验证命令
 
 从仓库根目录执行并把实际结果关联到证据 ID：

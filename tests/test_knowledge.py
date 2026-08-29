@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date, datetime
 
 import pytest
 from sqlalchemy import select
@@ -25,6 +26,34 @@ class TestKnowledgeSearch:
         engine = KnowledgeEngine(db_session)
         results = await engine.search("租赁合同", "租赁合同")
         assert results == []
+
+    async def test_search_laws_returns_traceable_source_fields(self, db_session):
+        ref = LegalReference(
+            id="law-1",
+            law_name="中华人民共和国民法典",
+            article_number="第五百八十五条",
+            content="违约金",
+            effective_date=date(2021, 1, 1),
+            source_url="https://flk.npc.gov.cn/detail.html?law=民法典",
+            verified_at=datetime(2026, 8, 29),
+            tags=json.dumps(["违约金"]),
+        )
+        db_session.add(ref)
+        await db_session.commit()
+
+        results = await KnowledgeEngine(db_session).search_laws(
+            "违约金条款", "租赁合同"
+        )
+
+        assert results == [{
+            "id": "law-1",
+            "law_name": "中华人民共和国民法典",
+            "article_number": "第五百八十五条",
+            "content": "违约金",
+            "effective_date": "2021-01-01",
+            "source_url": "https://flk.npc.gov.cn/detail.html?law=民法典",
+            "verified_at": "2026-08-29T00:00:00",
+        }]
 
     async def test_search_with_matching_rules(self, db_session):
         """测试匹配规则检索"""

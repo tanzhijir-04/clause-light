@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -111,10 +112,10 @@ async def _init_default_rules():
 
         law_count_stmt = select(func.count()).select_from(LegalReference)
         law_count = (await db.execute(law_count_stmt)).scalar() or 0
+        laws_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "shared", "laws")
 
         if law_count == 0:
             logger.info("法规库为空，导入默认法规...")
-            laws_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "shared", "laws")
             if os.path.isdir(laws_dir):
                 for filename in os.listdir(laws_dir):
                     if not filename.endswith(".json"):
@@ -133,11 +134,22 @@ async def _init_default_rules():
                                 except (ValueError, TypeError):
                                     pass
 
+                            verified_at = None
+                            if law.get("verified_at"):
+                                try:
+                                    verified_at = datetime.fromisoformat(
+                                        str(law["verified_at"]).replace("Z", "+00:00")
+                                    )
+                                except (ValueError, TypeError):
+                                    pass
+
                             ref = LegalReference(
                                 law_name=law["law_name"],
                                 article_number=law.get("article_number", ""),
                                 content=law.get("content", ""),
                                 effective_date=eff_date,
+                                source_url=law.get("source_url"),
+                                verified_at=verified_at,
                                 tags=json.dumps(law.get("tags", []), ensure_ascii=False),
                             )
                             db.add(ref)
@@ -146,6 +158,38 @@ async def _init_default_rules():
                         logger.warning("导入法规失败 %s: %s", filename, e)
 
                 await db.commit()
+
+        elif os.path.isdir(laws_dir):
+            # 已有法规数据也要补齐新来源字段，不能因非空而永久跳过。
+            for filename in os.listdir(laws_dir):
+                if not filename.endswith(".json"):
+                    continue
+                try:
+                    with open(os.path.join(laws_dir, filename), "r", encoding="utf-8") as f:
+                        laws_data = json.load(f)
+                    for law in laws_data:
+                        if not law.get("source_url"):
+                            continue
+                        stmt = select(LegalReference).where(
+                            LegalReference.law_name == law.get("law_name"),
+                            LegalReference.article_number == law.get("article_number", ""),
+                        )
+                        ref = (await db.execute(stmt)).scalar_one_or_none()
+                        if ref is None:
+                            continue
+                        if not ref.source_url:
+                            ref.source_url = law["source_url"]
+                        if not ref.verified_at and law.get("verified_at"):
+                            try:
+                                ref.verified_at = datetime.fromisoformat(
+                                    str(law["verified_at"]).replace("Z", "+00:00")
+                                )
+                            except (ValueError, TypeError):
+                                pass
+                    logger.info("补齐法规来源: %s", filename)
+                except Exception as e:
+                    logger.warning("补齐法规来源失败 %s: %s", filename, e)
+            await db.commit()
 
 
 # ── 创建 App ──

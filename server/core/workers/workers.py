@@ -130,9 +130,11 @@ def build_worker_system_prompt(dimension: str) -> str:
         f"只返回 JSON（不要 markdown）。优先对象格式：\n"
         f'{{"risks":[{{"clause_id":"...","risk_level":"red|yellow|green",'
         f'"risk_type":"...","issue":"...","unfavorable_to":"...",'
-        f'"severity":1,"suggestion":"...","legal_basis":"..."}}]}}\n'
+        f'"severity":1,"suggestion":"...","legal_basis":"...",'
+        f'"citation_ids":["法条数据库ID"]}}]}}\n'
         f"也可以直接返回上述元素组成的 JSON 数组。"
         f"如某条款在本维度无风险，risk_level 为 green，issue 为「本维度无明显风险」。\n"
+        f"citation_ids 只能填写输入中 [LAW:<数据库ID>] 的 ID，没有合适法条时返回空数组。\n"
     )
 
 
@@ -162,6 +164,11 @@ async def analyze_dimension(
 
     system_prompt = build_worker_system_prompt(dimension)
 
+    def law_refs_for(clause: ClauseItem) -> list[dict]:
+        if clause.law_references is not None:
+            return clause.law_references
+        return kb_laws or []
+
     # 构建条款输入
     clauses_input = json.dumps(
         [{"id": c.id, "type": c.type, "title": c.title, "text": c.text} for c in relevant],
@@ -176,10 +183,16 @@ async def analyze_dimension(
     if kb_rules:
         user_content += "\n\n相关知识库规则（供参考）：\n" + "\n".join(f"- {r}" for r in kb_rules)
 
-    if kb_laws:
+    law_refs = [law for clause in relevant for law in law_refs_for(clause)]
+    if law_refs:
         user_content += "\n\n相关法律条文（供参考）：\n"
-        for law in kb_laws:
-            user_content += f"- {law.get('law_name', '')} {law.get('article_number', '')}: {law.get('content', '')}\n"
+        for clause in relevant:
+            for law in law_refs_for(clause):
+                user_content += (
+                    f"条款 {clause.id}: [LAW:{law.get('id', '')}] "
+                    f"《{law.get('law_name', '')}》{law.get('article_number', '')}："
+                    f"{law.get('content', '')}\n"
+                )
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -227,6 +240,27 @@ async def analyze_dimension(
 
     results: list[ClauseRisk] = []
     for item in risk_items:
+        raw_citations = item.get("citation_ids", [])
+        clause_refs = next(
+            (law_refs_for(clause) for clause in relevant if clause.id == item["clause_id"]),
+            [],
+        )
+        allowed_ids = {
+            str(law.get("id")) for law in clause_refs if law.get("id") is not None
+        }
+        if not isinstance(raw_citations, list):
+            raw_citations = []
+            invalid_citations = True
+        else:
+            invalid_citations = any(
+                not isinstance(citation_id, str) or citation_id not in allowed_ids
+                for citation_id in raw_citations
+            )
+        citation_ids = []
+        for citation_id in raw_citations:
+            if isinstance(citation_id, str) and citation_id in allowed_ids and citation_id not in citation_ids:
+                citation_ids.append(citation_id)
+
         results.append(ClauseRisk(
             clause_id=item["clause_id"],
             risk_level=item["risk_level"],
@@ -237,7 +271,9 @@ async def analyze_dimension(
             suggestion=item.get("suggestion", ""),
             legal_basis=item.get("legal_basis", ""),
             dimension=dimension,
-            citation_ids=item.get("citation_ids", []),
+            citation_ids=citation_ids,
+            review_required=invalid_citations,
+            review_reason="法条引用未通过校验" if invalid_citations else "",
         ))
 
     returned_ids = {r.clause_id for r in results}
@@ -317,7 +353,10 @@ async def analyze_dimension_with_context(
     if kb_laws:
         user_content += "\n\n相关法律条文（供参考）：\n"
         for law in kb_laws:
-            user_content += f"- {law.get('law_name', '')} {law.get('article_number', '')}: {law.get('content', '')}\n"
+            user_content += (
+                f"[LAW:{law.get('id', '')}] 《{law.get('law_name', '')}》"
+                f"{law.get('article_number', '')}：{law.get('content', '')}\n"
+            )
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -359,6 +398,23 @@ async def analyze_dimension_with_context(
         failed.phase = "resolved"
         return failed
 
+    raw_citations = parsed.get("citation_ids", [])
+    allowed_ids = {
+        str(law.get("id")) for law in (kb_laws or []) if law.get("id") is not None
+    }
+    invalid_citations = not isinstance(raw_citations, list) or any(
+        not isinstance(citation_id, str) or citation_id not in allowed_ids
+        for citation_id in (raw_citations if isinstance(raw_citations, list) else [])
+    )
+    citation_ids: list[str] = []
+    for citation_id in (raw_citations if isinstance(raw_citations, list) else []):
+        if (
+            isinstance(citation_id, str)
+            and citation_id in allowed_ids
+            and citation_id not in citation_ids
+        ):
+            citation_ids.append(citation_id)
+
     return ClauseRisk(
         clause_id=parsed["clause_id"],
         risk_level=parsed["risk_level"],
@@ -369,7 +425,9 @@ async def analyze_dimension_with_context(
         suggestion=parsed.get("suggestion", ""),
         legal_basis=parsed.get("legal_basis", ""),
         dimension=dimension,
-        citation_ids=parsed.get("citation_ids", []),
+        citation_ids=citation_ids,
+        review_required=invalid_citations,
+        review_reason="法条引用未通过校验" if invalid_citations else "",
         phase="resolved",
     )
 

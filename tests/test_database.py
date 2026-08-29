@@ -223,6 +223,33 @@ class TestSchemaMigration:
         finally:
             await engine.dispose()
 
+    async def test_migrate_adds_nullable_legal_reference_source_columns(self, tmp_path):
+        """旧法规表迁移新增来源列，且不生成 DEFAULT None。"""
+        db_file = tmp_path / "legacy-laws.db"
+        engine = create_async_engine(f"sqlite+aiosqlite:///{db_file.as_posix()}")
+        async with engine.begin() as conn:
+            await conn.execute(text("""
+                CREATE TABLE legal_references (
+                    id VARCHAR PRIMARY KEY,
+                    law_name VARCHAR NOT NULL,
+                    article_number VARCHAR,
+                    content TEXT,
+                    effective_date DATE,
+                    tags TEXT
+                )
+            """))
+        try:
+            await migrate_schema(engine)
+            async with engine.connect() as conn:
+                columns = {
+                    row[1]: row[4]
+                    for row in (await conn.execute(text("PRAGMA table_info(legal_references)"))).fetchall()
+                }
+            assert columns["source_url"] is None
+            assert columns["verified_at"] is None
+        finally:
+            await engine.dispose()
+
 
 class TestSyncLogModel:
     """同步日志模型测试"""

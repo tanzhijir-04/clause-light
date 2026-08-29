@@ -123,6 +123,8 @@ class LegalReference(Base):
     article_number = Column(String, nullable=True)
     content = Column(Text, nullable=True)
     effective_date = Column(Date, nullable=True)
+    source_url = Column(Text, nullable=True)
+    verified_at = Column(DateTime, nullable=True)
     tags = Column(Text, nullable=True)  # JSON 字符串
 
 
@@ -315,8 +317,12 @@ async def init_db() -> None:
 # ── 轻量迁移 ──
 
 # 新分支在已有表上新增的列（create_all 不会修改已有表，需手动 ALTER）
-_LEGACY_COLUMN_MIGRATIONS: dict[str, tuple[str, str, object]] = {
-    "knowledge_rules": ("status", "VARCHAR", "active"),
+_LEGACY_COLUMN_MIGRATIONS: dict[str, list[tuple[str, str, object | None]]] = {
+    "knowledge_rules": [("status", "VARCHAR", "active")],
+    "legal_references": [
+        ("source_url", "TEXT", None),
+        ("verified_at", "DATETIME", None),
+    ],
 }
 
 
@@ -326,28 +332,32 @@ async def migrate_schema(engine) -> None:
     def _run(sync_conn) -> None:
         inspector = inspect(sync_conn)
         tables = set(inspector.get_table_names())
-        for table_name, (col_name, col_type, default) in _LEGACY_COLUMN_MIGRATIONS.items():
+        for table_name, migrations in _LEGACY_COLUMN_MIGRATIONS.items():
             if table_name not in tables:
                 continue
             columns = {c["name"] for c in inspector.get_columns(table_name)}
-            if col_name in columns:
-                continue
-            if isinstance(default, str):
-                default_sql = f"'{default}'"
-            elif isinstance(default, bool):
-                default_sql = "1" if default else "0"
-            else:
-                default_sql = str(default)
-            sync_conn.exec_driver_sql(
-                f'ALTER TABLE "{table_name}" ADD COLUMN "{col_name}" {col_type} DEFAULT {default_sql}'
-            )
-            logger.info("数据库迁移: %s 表新增列 %s", table_name, col_name)
-            if table_name == "knowledge_rules" and col_name == "status":
-                # 旧数据按 is_active 回填 status
+            for col_name, col_type, default in migrations:
+                if col_name in columns:
+                    continue
+                default_sql = ""
+                if default is not None:
+                    if isinstance(default, str):
+                        default_sql = f" DEFAULT '{default}'"
+                    elif isinstance(default, bool):
+                        default_sql = f" DEFAULT {'1' if default else '0'}"
+                    else:
+                        default_sql = f" DEFAULT {default}"
                 sync_conn.exec_driver_sql(
-                    "UPDATE knowledge_rules SET status = "
-                    "CASE WHEN is_active THEN 'active' ELSE 'disabled' END"
+                    f'ALTER TABLE "{table_name}" ADD COLUMN "{col_name}" {col_type}{default_sql}'
                 )
+                logger.info("数据库迁移: %s 表新增列 %s", table_name, col_name)
+                if table_name == "knowledge_rules" and col_name == "status":
+                    # 旧数据按 is_active 回填 status
+                    sync_conn.exec_driver_sql(
+                        "UPDATE knowledge_rules SET status = "
+                        "CASE WHEN is_active THEN 'active' ELSE 'disabled' END"
+                    )
+                columns.add(col_name)
 
     async with engine.begin() as conn:
         await conn.run_sync(_run)

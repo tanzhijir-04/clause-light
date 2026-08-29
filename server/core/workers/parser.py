@@ -104,6 +104,7 @@ class ClauseItem:
     source_end: int = -1
     review_required: bool = False
     review_reason: str = ""
+    law_references: list[dict] | None = None
 
 
 @dataclass
