@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass, field
 
 from server.core.llm import LLMGateway
-from server.core.schemas.llm_outputs import ParseResultSchema
+from server.core.schemas.llm_outputs import ParseResultSchema, RiskDimension
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,7 @@ class ClauseItem:
     type: str = "other"
     title: str = ""
     text: str = ""
-    relevance: list[str] = field(default_factory=lambda: ["general"])
+    relevance: list[RiskDimension] = field(default_factory=lambda: ["general"])
 
 
 @dataclass

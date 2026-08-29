@@ -10,7 +10,7 @@ from server.core.agent import AnalysisResult, ContractAgent, TYPE_EN_MAP
 from server.core.document_ingress import DocumentResult
 from server.core.workers.parser import ClauseItem, ParseResult
 from server.core.workers.workers import ClauseRisk
-from server.core.workers.evaluator import EvaluationResult
+from server.core.workers.evaluator import EvaluationResult, evaluate as real_evaluate
 
 
 class TestAnalysisResult:
@@ -20,7 +20,7 @@ class TestAnalysisResult:
         """测试默认值"""
         result = AnalysisResult()
         assert result.contract_id == ""
-        assert result.overall_score == 0
+        assert result.overall_score is None
         assert result.clauses == []
         assert result.red_count == 0
 
@@ -86,6 +86,13 @@ def _mock_eval_result(score=85, red=0, yellow=0, green=1, recommendation="sign",
         one_line_summary=summary,
         top_risks=[],
     )
+
+
+def _configure_session(mock_factory):
+    mock_session = AsyncMock()
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+    mock_factory.return_value = mock_session
 
 
 class TestContractAgent:
@@ -209,7 +216,8 @@ class TestContractAgent:
         result = await self.agent.analyze(file_path="test.pdf")
         # Stage 1 失败时兜底：全文作为一个条款
         assert len(result.clauses) > 0, "LLM 失败时条款不应丢失"
-        assert result.clauses[0]["risk_level"] == "green"
+        assert result.clauses[0]["risk_level"] == "unknown"
+        assert result.clauses[0]["needs_review"] is True
 
     @patch("server.core.agent.document_ingress.ingest", new_callable=AsyncMock)
     async def test_analyze_step_callback(self, mock_ingest):
@@ -309,6 +317,91 @@ class TestContractAgent:
         assert len(result.clauses) >= 1
         assert result.contract_type == "租赁合同"
 
+    @patch("server.core.agent.analyze_dimension_with_context")
+    @patch("server.core.agent.evaluate")
+    @patch("server.core.agent.analyze_dimension")
+    @patch("server.core.agent.parse_contract")
+    @patch("server.core.agent.async_session_factory")
+    @patch("server.core.agent.document_ingress.ingest", new_callable=AsyncMock)
+    async def test_related_worker_exception_cannot_produce_unreviewed_green_clause(
+        self,
+        mock_ingest,
+        mock_factory,
+        mock_parse,
+        mock_dimension,
+        mock_evaluate,
+        mock_resolve,
+    ):
+        mock_ingest.return_value = _make_doc_result("合同内容")
+        clause = ClauseItem(
+            id="1",
+            type="payment",
+            title="付款",
+            text="验收后付款",
+            relevance=["financial"],
+        )
+        mock_parse.return_value = _mock_parse_result(clauses=[clause])
+
+        async def _fake_dimension(
+            dim, clauses, llm, contract_type, kb_rules=None, kb_laws=None, memory_context=""
+        ):
+            if dim == "financial":
+                raise RuntimeError("Worker 崩溃")
+            return []
+
+        mock_dimension.side_effect = _fake_dimension
+        mock_evaluate.side_effect = real_evaluate
+        _configure_session(mock_factory)
+
+        result = await self.agent.analyze(file_path="test.pdf")
+
+        assert result.clauses[0]["risk_level"] == "unknown"
+        assert result.clauses[0]["needs_review"] is True
+        assert result.green_count == 0
+
+    @patch("server.core.agent.analyze_dimension_with_context")
+    @patch("server.core.agent.evaluate")
+    @patch("server.core.agent.analyze_dimension")
+    @patch("server.core.agent.parse_contract")
+    @patch("server.core.agent.async_session_factory")
+    @patch("server.core.agent.document_ingress.ingest", new_callable=AsyncMock)
+    async def test_all_related_workers_failed_return_manual_review_unknown_clause(
+        self,
+        mock_ingest,
+        mock_factory,
+        mock_parse,
+        mock_dimension,
+        mock_evaluate,
+        mock_resolve,
+    ):
+        mock_ingest.return_value = _make_doc_result("合同内容")
+        clause = ClauseItem(
+            id="1",
+            type="payment",
+            title="付款",
+            text="验收后付款",
+            relevance=["financial"],
+        )
+        mock_parse.return_value = _mock_parse_result(clauses=[clause])
+
+        async def _fake_dimension(
+            dim, clauses, llm, contract_type, kb_rules=None, kb_laws=None, memory_context=""
+        ):
+            if dim == "financial":
+                raise RuntimeError("Worker 崩溃")
+            return []
+
+        mock_dimension.side_effect = _fake_dimension
+        mock_evaluate.side_effect = real_evaluate
+        _configure_session(mock_factory)
+
+        result = await self.agent.analyze(file_path="test.pdf")
+
+        assert result.clauses[0]["risk_level"] == "unknown"
+        assert result.overall_score is None
+        assert result.recommendation == "manual_review"
+        assert result.green_count == 0
+        assert result.needs_review == ["1"]
     @patch("server.core.agent.evaluate")
     @patch("server.core.agent.analyze_dimension")
     @patch("server.core.agent.parse_contract")

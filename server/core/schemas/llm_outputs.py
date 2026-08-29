@@ -7,14 +7,18 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+RiskDimension = Literal["equity", "financial", "ip", "dispute", "general"]
+RiskLevel = Literal["red", "yellow", "green", "unknown"]
+
+
 class ParseClauseSchema(BaseModel):
     """Stage 1 单条条款"""
 
-    id: str = Field(description="条款编号")
-    type: str = Field(description="条款类型枚举")
+    id: str = Field(min_length=1, description="条款编号")
+    type: str = "other"
     title: str = ""
-    text: str = ""
-    relevance: list[str] = Field(default_factory=list)
+    text: str = Field(min_length=1)
+    relevance: list[RiskDimension] = Field(default_factory=lambda: ["general"])
 
 
 class ParseResultSchema(BaseModel):
@@ -29,7 +33,7 @@ class ParseResultSchema(BaseModel):
 class ClauseRiskSchema(BaseModel):
     """Stage 2 单条风险"""
 
-    clause_id: str = ""
+    clause_id: str = Field(min_length=1)
     risk_level: Literal["red", "yellow", "green"] = "green"
     risk_type: str = ""
     issue: str = ""
@@ -37,6 +41,7 @@ class ClauseRiskSchema(BaseModel):
     severity: int = Field(default=1, ge=1, le=10)
     suggestion: str = ""
     legal_basis: str = ""
+    citation_ids: list[str] = Field(default_factory=list)
 
 
 class ClauseRiskListSchema(BaseModel):
@@ -54,7 +59,7 @@ class EvaluationSchema(BaseModel):
     needs_review: list[str] = Field(default_factory=list)
     top_risks: list[str] = Field(default_factory=list)
     risk_distribution: dict[str, int] = Field(
-        default_factory=lambda: {"red": 0, "yellow": 0, "green": 0}
+        default_factory=lambda: {"red": 0, "yellow": 0, "green": 0, "unknown": 0}
     )
 
 

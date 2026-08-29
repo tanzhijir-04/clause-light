@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Callable
 
 from server.core import document_ingress
@@ -18,6 +18,7 @@ from server.core.workers.workers import (
     analyze_dimension,
     analyze_dimension_with_context,
     detect_conflicts,
+    failed_clause_risk,
 )
 from server.core.workers.parser import ClauseItem, ParseResult, parse_contract
 
@@ -36,7 +37,7 @@ class AnalysisResult:
     contract_id: str = ""
     contract_type: str = ""
     contract_type_en: str = "other"
-    overall_score: int = 0
+    overall_score: int | None = None
     recommendation: str = "negotiate_first"
     summary: str = ""
     model_used: str = ""
@@ -49,6 +50,10 @@ class AnalysisResult:
     ocr_text: str = ""  # 文档解析全文（AnyDoc/OCR；字段名保持兼容，供原文标注视图）
     error: str = ""  # 分析失败时的错误信息，调用方可据此判断成功/失败
     session_id: str = ""  # L0 记忆会话 id（可选，旧客户端可忽略）
+    analysis_status: str = "completed"
+    review_reasons: dict[str, list[str]] = field(default_factory=dict)
+    worker_risks: list[dict] = field(default_factory=list)
+    processing_mode: str = ""
 
 
 # Worker 维度列表
@@ -248,8 +253,21 @@ class ContractAgent:
         for dim, res in zip(DIMENSIONS, worker_results):
             if isinstance(res, Exception):
                 logger.warning("Worker[%s] 失败: %s", dim, res)
+                all_risks.extend(
+                    failed_clause_risk(clause, dim, str(res))
+                    for clause in parse_result.clauses
+                    if dim in clause.relevance
+                )
             elif isinstance(res, list):
                 all_risks.extend(res)
+
+        # Worker 返回空列表时也要为相关条款留下可复核的失败结果。
+        for clause in parse_result.clauses:
+            if not any(r.clause_id == clause.id for r in all_risks):
+                dimension = clause.relevance[0] if clause.relevance else "general"
+                all_risks.append(
+                    failed_clause_risk(clause, dimension, "未获得 Worker 分析结果")
+                )
 
         # ── 冲突检测 + 第二轮带上下文分析 ──
         conflicts = detect_conflicts(all_risks)
@@ -328,16 +346,19 @@ class ContractAgent:
                         logger.warning("冲突工具调用失败，仅用原上下文: %s", e)
                         conflict_tool_budget -= 1
 
-                new_risk = await analyze_dimension_with_context(
-                    resolve_dim,
-                    clause,
-                    self.llm,
-                    parse_result.contract_type,
-                    cross_context,
-                    kb_rules,
-                    kb_laws,
-                    memory_context=conflict_memory,
-                )
+                try:
+                    new_risk = await analyze_dimension_with_context(
+                        resolve_dim,
+                        clause,
+                        self.llm,
+                        parse_result.contract_type,
+                        cross_context,
+                        kb_rules,
+                        kb_laws,
+                        memory_context=conflict_memory,
+                    )
+                except Exception as exc:
+                    new_risk = failed_clause_risk(clause, resolve_dim, str(exc))
 
                 if new_risk:
                     # 用新结果替换冲突中的旧结果
@@ -363,17 +384,48 @@ class ContractAgent:
             for r in all_risks:
                 if r.risk_level in eval_result.risk_distribution:
                     eval_result.risk_distribution[r.risk_level] += 1
+                if r.review_required or r.risk_level == "unknown":
+                    if r.clause_id not in eval_result.needs_review:
+                        eval_result.needs_review.append(r.clause_id)
+            if not any(
+                r.analysis_status in {"completed", "resolved"}
+                and r.risk_level in {"red", "yellow", "green"}
+                for r in all_risks
+            ):
+                eval_result.recommendation = "manual_review"
+                eval_result.one_line_summary = "系统未形成可用评级，请人工复核"
+                eval_result.overall_score = None
+            eval_result.needs_review.sort()
 
         # ── 组装最终结果 ──
         await _notify(5, 5, "正在生成报告...")
         result.overall_score = eval_result.overall_score
         result.recommendation = eval_result.recommendation
         result.summary = eval_result.one_line_summary
-        result.needs_review = eval_result.needs_review
+        result.needs_review = sorted(
+            set(eval_result.needs_review)
+            | {r.clause_id for r in all_risks if r.review_required}
+        )
         result.top_risks = eval_result.top_risks
         result.red_count = eval_result.risk_distribution.get("red", 0)
         result.yellow_count = eval_result.risk_distribution.get("yellow", 0)
         result.green_count = eval_result.risk_distribution.get("green", 0)
+        result.processing_mode = "parallel"
+        result.worker_risks = [asdict(r) for r in all_risks]
+        result.review_reasons = {}
+        for risk in all_risks:
+            if risk.review_required or risk.clause_id in result.needs_review:
+                reason = risk.review_reason or risk.failure_reason or "需要人工复核"
+                result.review_reasons.setdefault(risk.clause_id, []).append(reason)
+        result.analysis_status = (
+            "completed"
+            if any(
+                r.analysis_status in {"completed", "resolved"}
+                and r.risk_level in {"red", "yellow", "green"}
+                for r in all_risks
+            )
+            else "failed"
+        )
 
         # 组装条款列表（合并解析结果和风险评估结果）
         # 同一 clause_id + 同一维度只保留 severity 最高的
@@ -385,26 +437,31 @@ class ContractAgent:
 
         for clause in parse_result.clauses:
             risk = risk_map.get(clause.id)
+            if risk is None:
+                dimension = clause.relevance[0] if clause.relevance else "general"
+                risk = failed_clause_risk(clause, dimension, "未获得可用风险评级")
             clause_dict = {
                 "clause_number": clause.id,
                 "title": clause.title,
                 "content": clause.text,
                 "type": clause.type,
-                "risk_level": risk.risk_level if risk else "green",
-                "risk_type": risk.risk_type if risk else "未分析",
-                "risk_summary": risk.issue if risk else "本维度无明显风险",
-                "plain_explanation": risk.issue if risk else "",
-                "severity_score": risk.severity if risk else 1,
-                "suggested_clause": risk.suggestion if risk else "",
-                "legal_basis": risk.legal_basis if risk else "",
-                "unfavorable_to": risk.unfavorable_to if risk else "",
-                "needs_review": clause.id in eval_result.needs_review,
+                "risk_level": risk.risk_level,
+                "risk_type": risk.risk_type or "未分析",
+                "risk_summary": risk.issue,
+                "plain_explanation": risk.issue,
+                "severity_score": risk.severity,
+                "suggested_clause": risk.suggestion,
+                "legal_basis": risk.legal_basis,
+                "unfavorable_to": risk.unfavorable_to,
+                "citation_ids": risk.citation_ids,
+                "analysis_status": risk.analysis_status,
+                "needs_review": clause.id in result.needs_review or risk.review_required,
             }
             result.clauses.append(clause_dict)
 
         result.contract_id = contract_id
         logger.info(
-            "分析完成: score=%d red=%d yellow=%d green=%d review=%d",
+            "分析完成: score=%s red=%d yellow=%d green=%d review=%d",
             result.overall_score,
             result.red_count,
             result.yellow_count,

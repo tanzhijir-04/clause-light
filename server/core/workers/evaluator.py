@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 @dataclass
 class EvaluationResult:
     """Stage 3 聚合结果"""
-    overall_score: int = 0
+    overall_score: int | None = None
     risk_distribution: dict[str, int] = field(
-        default_factory=lambda: {"red": 0, "yellow": 0, "green": 0}
+        default_factory=lambda: {"red": 0, "yellow": 0, "green": 0, "unknown": 0}
     )
     recommendation: str = "negotiate_first"
     one_line_summary: str = ""
@@ -30,19 +30,36 @@ async def evaluate(
     clause_risks: list[ClauseRisk],
     llm: LLMGateway,
 ) -> EvaluationResult:
-    """
-    Stage 3: 一致性检查 + 聚合评分。
+    """Filter unreliable Worker results, then aggregate reliable ratings."""
+    valid_risks = [
+        r
+        for r in clause_risks
+        if r.analysis_status in {"completed", "resolved"}
+        and r.risk_level in {"red", "yellow", "green"}
+    ]
+    failed_risks = [r for r in clause_risks if r not in valid_risks]
+    failed_clause_ids = {r.clause_id for r in failed_risks if r.clause_id}
+    failed_count = len(failed_risks)
 
-    1. 检测同一条款在不同 Worker 间的评级冲突
-    2. 聚合评分
-    3. 生成总结
-    """
+    if not valid_risks:
+        return EvaluationResult(
+            overall_score=None,
+            risk_distribution={
+                "red": 0,
+                "yellow": 0,
+                "green": 0,
+                "unknown": failed_count,
+            },
+            recommendation="manual_review",
+            one_line_summary="系统未形成可用评级，请人工复核",
+            needs_review=sorted(failed_clause_ids),
+        )
 
     result = EvaluationResult()
 
-    # ── 1. 一致性检查：按 clause_id 分组，检测冲突 ──
+    # ── 1. 一致性检查：仅在可靠结果中检测冲突 ──
     by_clause: dict[str, list[ClauseRisk]] = defaultdict(list)
-    for r in clause_risks:
+    for r in valid_risks:
         by_clause[r.clause_id].append(r)
 
     needs_review: list[str] = []
@@ -52,10 +69,10 @@ async def evaluate(
             needs_review.append(clause_id)
             logger.warning("条款 %s 评级冲突: %s", clause_id, levels)
 
-    # ── 2. 聚合评分 ──
+    # ── 2. 聚合评分：提示词不携带失败或 unknown 结果 ──
     risk_list_text = "\n".join(
         f"条款 {r.clause_id}: {r.risk_level} ({r.risk_type}) - {r.issue}"
-        for r in clause_risks
+        for r in valid_risks
     )
 
     system_prompt = (
@@ -105,31 +122,39 @@ async def evaluate(
             result.one_line_summary = parsed.get("one_line_summary", "")
             result.top_risks = parsed.get("top_risks", [])
 
-    # ── 兜底：如果 LLM 没给出分布，从条款统计 ──
-    if not any(result.risk_distribution.values()):
-        for r in clause_risks:
-            level = r.risk_level
-            if level in result.risk_distribution:
-                result.risk_distribution[level] += 1
+    # ── 兜底：如果 LLM 没给出分布，从可靠条款统计 ──
+    if not any(result.risk_distribution.get(level, 0) for level in ("red", "yellow", "green")):
+        for r in valid_risks:
+            result.risk_distribution[r.risk_level] += 1
 
-    # 如果没有评分，根据红黄绿比例计算
-    if result.overall_score == 0:
-        total = sum(result.risk_distribution.values())
+    result.risk_distribution.setdefault("unknown", 0)
+    result.risk_distribution["unknown"] = failed_count
+
+    # 如果没有评分，根据红黄绿比例计算；unknown 不进入分母和 green_count。
+    if result.overall_score is None:
+        total = sum(
+            result.risk_distribution.get(level, 0)
+            for level in ("red", "yellow", "green")
+        )
         if total > 0:
             result.overall_score = int(
-                (result.risk_distribution["green"] * 90
-                 + result.risk_distribution["yellow"] * 60
-                 + result.risk_distribution["red"] * 20) / total
+                (
+                    result.risk_distribution.get("green", 0) * 90
+                    + result.risk_distribution.get("yellow", 0) * 60
+                    + result.risk_distribution.get("red", 0) * 20
+                )
+                / total
             )
 
-    result.needs_review = needs_review
+    result.needs_review = sorted(set(needs_review) | failed_clause_ids)
 
     logger.info(
-        "Stage 3 完成: score=%d red=%d yellow=%d green=%d review=%d",
+        "Stage 3 完成: score=%s red=%d yellow=%d green=%d unknown=%d review=%d",
         result.overall_score,
         result.risk_distribution.get("red", 0),
         result.risk_distribution.get("yellow", 0),
         result.risk_distribution.get("green", 0),
-        len(needs_review),
+        result.risk_distribution.get("unknown", 0),
+        len(result.needs_review),
     )
     return result

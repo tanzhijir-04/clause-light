@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from server.core.llm import LLMGateway
-from server.core.schemas.llm_outputs import ClauseRiskListSchema, ClauseRiskSchema
+from server.core.schemas.llm_outputs import (
+    ClauseRiskListSchema,
+    ClauseRiskSchema,
+    RiskDimension,
+    RiskLevel,
+)
 from server.core.workers.parser import ClauseItem
 
 logger = logging.getLogger(__name__)
@@ -19,13 +24,38 @@ logger = logging.getLogger(__name__)
 class ClauseRisk:
     """单条条款的风险评估结果"""
     clause_id: str = ""
-    risk_level: str = "green"       # red / yellow / green
+    risk_level: RiskLevel = "green"  # red / yellow / green / unknown
     risk_type: str = ""
     issue: str = ""
     unfavorable_to: str = ""
     severity: int = 1
     suggestion: str = ""
     legal_basis: str = ""
+    dimension: RiskDimension = "general"
+    analysis_status: str = "completed"
+    review_required: bool = False
+    review_reason: str = ""
+    failure_reason: str = ""
+    citation_ids: list[str] = field(default_factory=list)
+    phase: str = "initial"
+
+
+def failed_clause_risk(
+    clause: ClauseItem,
+    dimension: RiskDimension,
+    reason: str,
+) -> ClauseRisk:
+    """Create an explicit, reviewable result when a Worker cannot decide."""
+    return ClauseRisk(
+        clause_id=clause.id,
+        dimension=dimension,
+        risk_level="unknown",
+        analysis_status="failed",
+        review_required=True,
+        review_reason=f"{dimension} 维度分析失败",
+        failure_reason=reason,
+        issue="系统未形成可靠判断，请人工复核",
+    )
 
 
 # ── 维度配置 ──
@@ -156,46 +186,57 @@ async def analyze_dimension(
         {"role": "user", "content": user_content},
     ]
 
-    resp = await llm.chat_structured(
-        messages, schema=ClauseRiskListSchema, task="analysis"
-    )
+    try:
+        resp = await llm.chat_structured(
+            messages, schema=ClauseRiskListSchema, task="analysis"
+        )
+    except Exception as exc:
+        logger.warning("Worker[%s]: LLM 调用失败: %s", dimension, exc)
+        return [failed_clause_risk(c, dimension, str(exc)) for c in relevant]
 
     if resp.parsed is None and not resp.content:
         logger.warning("Worker[%s]: LLM 返回空内容", dimension)
-        return [
-            ClauseRisk(clause_id=c.id, risk_level="green", issue="分析失败，请人工复核")
-            for c in relevant
-        ]
+        return [failed_clause_risk(c, dimension, "LLM 返回空内容") for c in relevant]
 
-    risk_items: list = []
-    if isinstance(resp.parsed, ClauseRiskListSchema):
-        risk_items = [r.model_dump() for r in resp.parsed.risks]
-    else:
-        parsed = llm.parse_json(resp.content)
-        if isinstance(parsed, list):
-            risk_items = parsed
-        elif isinstance(parsed, dict) and isinstance(parsed.get("risks"), list):
-            risk_items = parsed["risks"]
+    try:
+        if isinstance(resp.parsed, ClauseRiskListSchema):
+            parsed_model = resp.parsed
         else:
-            logger.warning("Worker[%s]: JSON 解析失败", dimension)
-            return [
-                ClauseRisk(clause_id=c.id, risk_level="green", issue="分析失败，请人工复核")
-                for c in relevant
-            ]
+            parsed = llm.parse_json(resp.content)
+            if isinstance(parsed, list):
+                parsed = {"risks": parsed}
+            if not isinstance(parsed, dict):
+                raise ValueError("JSON 根对象不是风险列表")
+            parsed_model = ClauseRiskListSchema.model_validate(parsed)
+    except Exception as exc:
+        logger.warning("Worker[%s]: JSON/Schema 解析失败: %s", dimension, exc)
+        return [failed_clause_risk(c, dimension, str(exc)) for c in relevant]
+
+    risk_items = [r.model_dump() for r in parsed_model.risks]
+    if not risk_items:
+        return [failed_clause_risk(c, dimension, "LLM 未返回任何条款评级") for c in relevant]
 
     results: list[ClauseRisk] = []
     for item in risk_items:
-        if isinstance(item, dict):
-            results.append(ClauseRisk(
-                clause_id=item.get("clause_id", ""),
-                risk_level=item.get("risk_level", "green"),
-                risk_type=item.get("risk_type", ""),
-                issue=item.get("issue", ""),
-                unfavorable_to=item.get("unfavorable_to", ""),
-                severity=item.get("severity", 1),
-                suggestion=item.get("suggestion", ""),
-                legal_basis=item.get("legal_basis", ""),
-            ))
+        results.append(ClauseRisk(
+            clause_id=item["clause_id"],
+            risk_level=item["risk_level"],
+            risk_type=item.get("risk_type", ""),
+            issue=item.get("issue", ""),
+            unfavorable_to=item.get("unfavorable_to", ""),
+            severity=item.get("severity", 1),
+            suggestion=item.get("suggestion", ""),
+            legal_basis=item.get("legal_basis", ""),
+            dimension=dimension,
+            citation_ids=item.get("citation_ids", []),
+        ))
+
+    returned_ids = {r.clause_id for r in results}
+    results.extend(
+        failed_clause_risk(c, dimension, "LLM 未返回该条款评级")
+        for c in relevant
+        if c.id not in returned_ids
+    )
 
     logger.info(
         "Worker[%s] 完成: %d 条条款, red=%d yellow=%d green=%d via=%s",
@@ -274,29 +315,38 @@ async def analyze_dimension_with_context(
         {"role": "user", "content": user_content},
     ]
 
-    resp = await llm.chat_structured(
-        messages, schema=ClauseRiskSchema, task="analysis"
-    )
+    try:
+        resp = await llm.chat_structured(
+            messages, schema=ClauseRiskSchema, task="analysis"
+        )
+    except Exception as exc:
+        return failed_clause_risk(clause, dimension, str(exc))
 
     if isinstance(resp.parsed, ClauseRiskSchema):
         parsed = resp.parsed.model_dump()
     else:
         if not resp.content:
-            return None
-        raw = llm.parse_json(resp.content)
-        if not isinstance(raw, dict):
-            return None
-        parsed = raw
+            return failed_clause_risk(clause, dimension, "LLM 返回空内容")
+        try:
+            raw = llm.parse_json(resp.content)
+            if not isinstance(raw, dict):
+                raise ValueError("JSON 根对象不是单条风险")
+            parsed = ClauseRiskSchema.model_validate(raw).model_dump()
+        except Exception as exc:
+            return failed_clause_risk(clause, dimension, str(exc))
 
     return ClauseRisk(
-        clause_id=parsed.get("clause_id", clause.id),
-        risk_level=parsed.get("risk_level", "green"),
+        clause_id=parsed["clause_id"],
+        risk_level=parsed["risk_level"],
         risk_type=parsed.get("risk_type", ""),
         issue=parsed.get("issue", ""),
         unfavorable_to=parsed.get("unfavorable_to", ""),
         severity=parsed.get("severity", 1),
         suggestion=parsed.get("suggestion", ""),
         legal_basis=parsed.get("legal_basis", ""),
+        dimension=dimension,
+        citation_ids=parsed.get("citation_ids", []),
+        phase="resolved",
     )
 
 
