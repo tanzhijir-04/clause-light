@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import sys
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -84,8 +85,18 @@ def load_manifest(path: str | Path, *, require_comparison_set: bool = True) -> l
             records.append(record)
     if require_comparison_set:
         counts = Counter(groups.values())
-        if len(groups) != 6 or any(counts[item] != 2 for item in CONTRACT_TYPES):
-            raise ValueError("comparison set requires exactly 6 independent groups, with 2 rental, 2 labor, and 2 service groups")
+        group_counts = Counter(record["independent_group"] for record in records)
+        if (
+            len(records) != 6
+            or len(groups) != 6
+            or any(count != 1 for count in group_counts.values())
+            or any(counts[item] != 2 for item in CONTRACT_TYPES)
+        ):
+            raise ValueError(
+                "comparison set requires exactly 6 records and 6 independent groups, "
+                "with exactly 2 rental, 2 labor, and 2 service groups; "
+                "each independent_group must have exactly one sample/input"
+            )
     return records
 
 
@@ -128,8 +139,14 @@ def preflight(records: list[dict], config: dict, gateway: LLMGateway | None = No
             model_lock=config.get("model_lock") or None,
         )
     plan = gateway.get_processing_plan(task="analysis")
-    provider = config.get("provider_lock") or plan.provider
-    model = config.get("model_lock") or plan.model
+    provider_lock = config.get("provider_lock") or ""
+    model_lock = config.get("model_lock") or ""
+    if provider_lock and provider_lock != plan.provider:
+        raise ValueError("provider_lock 与实际 processing plan provider 不一致")
+    if model_lock and model_lock != plan.model:
+        raise ValueError("model_lock 与实际 processing plan model 不一致")
+    provider = provider_lock or plan.provider
+    model = model_lock or plan.model
     if not provider or not model or plan.processing_mode == "unavailable":
         raise ValueError("锁定的 provider/model 不可用")
     if plan.processing_mode == "remote":
@@ -175,7 +192,17 @@ def _trace_dicts(records: list[LLMCallRecord]) -> list[dict]:
 
 def _protocol_failure(result, provider: str, model: str):
     """将实际 trace 与预检锁定值比较；不泄露请求内容。"""
-    for record in getattr(result, "call_records", []):
+    records = getattr(result, "call_records", [])
+    if not records:
+        result.success = False
+        result.analysis_status = "failed"
+        result.overall_score = None
+        result.clauses = []
+        result.review_reasons = {"pipeline": ["ProtocolViolation"]}
+        result.error_type = "ProtocolViolation"
+        result.error_message = ""
+        return result
+    for record in records:
         if (
             record.get("provider") != provider
             or record.get("model") != model
@@ -242,7 +269,10 @@ async def _run(args, records, config, provider, model):
                             call_records=_trace_dicts(trace_records),
                             pricing=config.get("pricing"),
                         )
+                        protocol_check = False
                     else:
+                        protocol_check = True
+                        analysis_started = time.monotonic()
                         try:
                             run_input = input_text if mode == "single_pass" else record["input_path"]
                             run_kwargs = {
@@ -269,12 +299,15 @@ async def _run(args, records, config, provider, model):
                                 model=model,
                                 temperature=EXPERIMENT_TEMPERATURE,
                                 input_text=input_text,
+                                elapsed_ms=int((time.monotonic() - analysis_started) * 1000),
                                 parse_elapsed_ms=parse_elapsed_ms,
                                 error_type=type(exc).__name__,
                                 call_records=_trace_dicts(trace_records),
                                 pricing=config.get("pricing"),
                             )
-                    result = _protocol_failure(result, provider, model)
+                            protocol_check = False
+                    if protocol_check:
+                        result = _protocol_failure(result, provider, model)
                     result.experiment_id = experiment_id
                     handle.write(json.dumps(result.to_dict(False), ensure_ascii=False) + "\n")
                     handle.flush()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import asyncio
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -225,9 +226,7 @@ async def test_timeout_is_written_as_a_complete_failed_result(tmp_path, monkeypa
             self._trace_sink = kwargs.get("trace_sink")
 
     async def never_finishes(*args, **kwargs):
-        await asyncio.sleep(1)
-
-    import asyncio
+        await asyncio.sleep(0.05)
 
     monkeypatch.setattr(runner, "ingest", fake_ingest)
     monkeypatch.setattr(runner, "ExperimentGateway", FakeGateway)
@@ -263,7 +262,82 @@ async def test_timeout_is_written_as_a_complete_failed_result(tmp_path, monkeypa
     assert item["clauses"] == []
     assert item["error_type"] == "TimeoutError"
     assert item["error_message"] == ""
+    assert item["elapsed_ms"] > 0
     assert "真实正文不应被伪造" not in line
+
+
+@pytest.mark.asyncio
+async def test_runner_writes_failure_for_each_plan_key_when_preparse_ingest_fails(
+    tmp_path, monkeypatch
+):
+    from experiments.contract_pipeline import runner
+
+    input_file = tmp_path / "contract.jsonl"
+    input_file.write_text('{"private":"text"}\n', encoding="utf-8")
+    output = tmp_path / "result.jsonl"
+    run_mode_calls = []
+    gateway_requests = []
+
+    async def failing_ingest(path):
+        raise RuntimeError("ingest failed")
+
+    class FakeGateway:
+        def __init__(self, **kwargs):
+            self._trace_sink = kwargs.get("trace_sink")
+
+        async def chat(self, *args, **kwargs):
+            gateway_requests.append("chat")
+            raise AssertionError("model request must not be sent")
+
+        async def chat_structured(self, *args, **kwargs):
+            gateway_requests.append("chat_structured")
+            raise AssertionError("model request must not be sent")
+
+    async def unexpected_run_mode(*args, **kwargs):
+        run_mode_calls.append((args, kwargs))
+        raise AssertionError("run_mode must not be called after pre-parse failure")
+
+    monkeypatch.setattr(runner, "ingest", failing_ingest)
+    monkeypatch.setattr(runner, "ExperimentGateway", FakeGateway)
+    monkeypatch.setattr(runner, "run_mode", unexpected_run_mode)
+
+    args = SimpleNamespace(output=str(output), include_failed=False)
+    records = [{
+        "sample_id": "s1",
+        "input_path": str(input_file),
+        "contract_type": "rental",
+        "source_kind": "txt",
+        "authorization_note": "test",
+        "independent_group": "g1",
+        "contains_personal_data": False,
+    }]
+    config = {
+        "modes": ["single_pass", "serial_multi_stage", "parallel_multi_stage"],
+        "runs_per_sample": 2,
+        "temperature": 0.1,
+        "timeout_seconds": 1,
+        "pricing": None,
+        "structured_mode": "json_fallback",
+    }
+
+    await runner._run(args, records, config, "provider", "model")
+
+    rows = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 6
+    assert {(row["mode"], row["repeat_index"]) for row in rows} == {
+        ("single_pass", 1),
+        ("serial_multi_stage", 1),
+        ("parallel_multi_stage", 1),
+        ("single_pass", 2),
+        ("serial_multi_stage", 2),
+        ("parallel_multi_stage", 2),
+    }
+    assert all(row["success"] is False for row in rows)
+    assert all(row["analysis_status"] == "failed" for row in rows)
+    assert all(row["error_type"] == "RuntimeError" for row in rows)
+    assert all(row["sample_id"] == "s1" and row["independent_group"] == "g1" for row in rows)
+    assert run_mode_calls == []
+    assert gateway_requests == []
 
 
 @pytest.mark.asyncio
@@ -303,7 +377,11 @@ async def test_runner_parses_each_sample_once_rotates_modes_and_reuses_hash(tmp_
             overall_score=80,
             clauses=[],
             review_reasons={},
-            call_records=[],
+            call_records=[{
+                "provider": "provider",
+                "model": "model",
+                "temperature": 0.1,
+            }],
             estimated_cost=None,
             cost_currency="",
             input_sha256=hashlib.sha256("规范化 正文".encode()).hexdigest(),
