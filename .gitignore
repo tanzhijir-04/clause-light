@@ -50,3 +50,6 @@ experiments/results/*.csv
 node_modules/
 .expo/
 mobile/.expo/
+
+# Codex isolated worktrees
+.worktrees/
