@@ -18,6 +18,7 @@ from server.config import TYPE_EN_MAP, settings
 from server.core.agent import ContractAgent
 from server.core.document_ingress import ALLOWED_UPLOAD_EXTENSIONS
 from server.core.llm import get_llm_gateway
+from server.core.risk_display import summarize_risk
 from server.models.database import (
     Analysis,
     AsyncSession,
@@ -65,28 +66,20 @@ async def list_contracts(
             clause_stmt = select(ClauseAnalysis).where(ClauseAnalysis.analysis_id == analysis.id)
             clause_result = await db.execute(clause_stmt)
             clauses = clause_result.scalars().all()
-            red = sum(1 for cl in clauses if cl.risk_level == "red")
-            yellow = sum(1 for cl in clauses if cl.risk_level == "yellow")
-            green = sum(1 for cl in clauses if cl.risk_level == "green")
-            unknown = sum(1 for cl in clauses if (cl.risk_level or "unknown") == "unknown")
+            display = summarize_risk(
+                [cl.risk_level for cl in clauses],
+                analysis.status or "pending",
+                bool(analysis.review_required)
+                or any(bool(cl.review_required) for cl in clauses),
+            )
             score = analysis.overall_score or 0
             model = analysis.model_used or ""
             rec = analysis.recommendation or "negotiate_first"
         else:
-            red = yellow = green = unknown = 0
+            display = summarize_risk([])
             score = 0
             model = ""
             rec = "negotiate_first"
-
-        # 风险等级
-        if red > 0:
-            risk_level = "red"
-        elif yellow > 0:
-            risk_level = "yellow"
-        elif unknown > 0:
-            risk_level = "unknown"
-        else:
-            risk_level = "green"
 
         item = {
             "id": c.id,
@@ -94,11 +87,12 @@ async def list_contracts(
             "type": c.type or "其他",
             "typeEn": TYPE_EN_MAP.get(c.type, "other"),
             "score": score,
-            "riskLevel": risk_level,
-            "redCount": red,
-            "yellowCount": yellow,
-            "greenCount": green,
-            "unknownCount": unknown,
+            "riskLevel": display["riskLevel"],
+            "redCount": display["redCount"],
+            "yellowCount": display["yellowCount"],
+            "greenCount": display["greenCount"],
+            "unknownCount": display["unknownCount"],
+            "needsReview": display["needsReview"],
             "createdAt": c.created_at.strftime("%Y-%m-%d") if c.created_at else "",
             "status": "analyzed" if analysis else "pending",
             "model": model,
@@ -109,7 +103,7 @@ async def list_contracts(
             continue
         if type and item["typeEn"] != type:
             continue
-        if risk and risk_level != risk:
+        if risk and display["riskLevel"] != risk:
             continue
 
         response.append(item)
@@ -170,7 +164,6 @@ async def get_contract(
             refs_by_id = {ref.id: ref for ref in refs.scalars().all()}
 
     clauses_data = []
-    red = yellow = green = 0
     for clause in clauses:
         try:
             citation_values = json.loads(clause.citation_ids or "[]")
@@ -189,9 +182,6 @@ async def get_contract(
                     "verifiedAt": ref.verified_at.isoformat() if ref.verified_at else None,
                 })
         level = clause.risk_level or "unknown"
-        if level == "red": red += 1
-        elif level == "yellow": yellow += 1
-        elif level == "green": green += 1
         clauses_data.append({
             "id": clause.id,
             "clauseNumber": clause.clause_number or "",
@@ -229,17 +219,21 @@ async def get_contract(
             review_reasons = parsed if isinstance(parsed, dict) else {"analysis": [analysis.review_reason]}
         except (json.JSONDecodeError, TypeError):
             review_reasons = {"analysis": [analysis.review_reason]}
-    unknown_count = sum(1 for clause in clauses_data if clause["riskLevel"] == "unknown")
-    needs_review = bool(analysis and analysis.review_required) or any(c["needsReview"] for c in clauses_data)
+    display = summarize_risk(
+        [clause["riskLevel"] for clause in clauses_data],
+        analysis.status if analysis and analysis.status else "pending",
+        bool(analysis and analysis.review_required)
+        or any(c["needsReview"] for c in clauses_data),
+    )
     return {
         "id": contract.id,
         "title": contract.title or "未命名合同",
         "type": contract.type or "其他",
         "typeEn": TYPE_EN_MAP.get(contract.type, "other"),
         "score": analysis.overall_score if analysis else None,
-        "riskLevel": "red" if red else ("yellow" if yellow else ("unknown" if unknown_count else "green")),
-        "redCount": red, "yellowCount": yellow, "greenCount": green,
-        "unknownCount": unknown_count,
+        "riskLevel": display["riskLevel"],
+        "redCount": display["redCount"], "yellowCount": display["yellowCount"],
+        "greenCount": display["greenCount"], "unknownCount": display["unknownCount"],
         "createdAt": contract.created_at.strftime("%Y-%m-%d") if contract.created_at else "",
         "status": "analyzed" if analysis else "pending",
         "model": analysis.model_used if analysis else "",
@@ -248,7 +242,7 @@ async def get_contract(
         "fullText": contract.ocr_text or "",
         "sessionId": session_id,
         "analysisStatus": analysis.status if analysis else "pending",
-        "needsReview": needs_review,
+        "needsReview": display["needsReview"],
         "reviewReasons": review_reasons,
         "processingMode": analysis.processing_mode if analysis else None,
         "clauses": clauses_data,
@@ -520,11 +514,25 @@ async def analyze_contract(
             return
 
         # 推送最终结果
+        analysis_status = getattr(result, "analysis_status", "pending")
+        if not isinstance(analysis_status, str) or not analysis_status:
+            analysis_status = "pending"
+        review_reasons = getattr(result, "review_reasons", {})
+        if not isinstance(review_reasons, dict):
+            review_reasons = {}
+        display = summarize_risk(
+            [clause.get("risk_level") for clause in result.clauses],
+            analysis_status,
+            bool(review_reasons)
+            or any(clause.get("needs_review", False) for clause in result.clauses),
+        )
         yield _sse_event({
             "type": "result",
             "contractId": contract_id,
             "score": result.overall_score,
-            "riskLevel": "red" if result.red_count > 0 else ("yellow" if result.yellow_count > 0 else "green"),
+            **display,
+            "analysisStatus": analysis_status,
+            "reviewReasons": review_reasons,
             "sessionId": result.session_id
             if isinstance(getattr(result, "session_id", None), str)
             else "",

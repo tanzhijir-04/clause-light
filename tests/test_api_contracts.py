@@ -108,6 +108,28 @@ class TestGetContract:
         assert data["title"] == "详情合同"
         assert data["status"] == "pending"
 
+    async def test_failed_empty_analysis_is_not_green(self, contracts_client, db_session):
+        db_session.add(Contract(id="failed-empty", title="合成诊断合同", type="其他"))
+        db_session.add(
+            Analysis(
+                id="failed-empty-analysis",
+                contract_id="failed-empty",
+                status="failed",
+                review_required=True,
+                review_reason='{"pipeline":["解析失败"]}',
+            )
+        )
+        await db_session.commit()
+
+        detail = (await contracts_client.get("/api/contracts/failed-empty")).json()
+        rows = (await contracts_client.get("/api/contracts/")).json()
+        row = next(item for item in rows if item["id"] == "failed-empty")
+
+        assert detail["riskLevel"] == "unknown"
+        assert row["riskLevel"] == "unknown"
+        assert detail["needsReview"] is True
+        assert row["needsReview"] is True
+
     async def test_get_nonexistent(self, client):
         """测试获取不存在的合同"""
         response = await client.get("/api/contracts/nonexistent")
@@ -292,6 +314,59 @@ class TestAnalyzeContract:
             # SSE 流：至少推送了 result 事件
             assert "result" in response.text or '"score"' in response.text
             MockAgent.return_value.analyze.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "status,level,review",
+        [
+            ("partial", "unknown", True),
+            ("completed", "green", False),
+        ],
+    )
+    async def test_sse_result_preserves_review_state(
+        self, contracts_client, tmp_path, monkeypatch, status, level, review
+    ):
+        from server.api import contracts as api
+        from server.core.agent import AnalysisResult
+        from tests.conftest import test_session_factory
+
+        monkeypatch.setattr(api.settings, "UPLOAD_DIR", str(tmp_path))
+        result = AnalysisResult(
+            contract_id="synthetic-sse-run",
+            analysis_status=status,
+            clauses=[{"risk_level": level, "needs_review": review}],
+            review_reasons={"pipeline": ["Worker失败"]} if review else {},
+        )
+        gateway = SimpleNamespace(
+            get_processing_plan=lambda task: SimpleNamespace(processing_mode="local")
+        )
+        with (
+            patch.object(api, "get_llm_gateway", return_value=gateway),
+            patch.object(api, "async_session_factory", test_session_factory),
+            patch.object(api, "persist_analysis_result", AsyncMock(return_value=None)),
+            patch.object(api, "ContractAgent") as agent,
+        ):
+            agent.return_value.analyze = AsyncMock(return_value=result)
+            response = await contracts_client.post(
+                "/api/contracts/analyze",
+                files={"file": ("synthetic.pdf", b"mock input", "application/pdf")},
+            )
+
+        assert response.status_code == 200
+        events = [
+            json.loads(line[6:])
+            for line in response.text.splitlines()
+            if line.startswith("data: ")
+        ]
+        finals = [event for event in events if event["type"] == "result"]
+        assert len(finals) == 1
+        expected_level = level if status == "completed" else "unknown"
+        assert finals[0]["riskLevel"] == expected_level
+        assert finals[0]["contractId"]
+        assert "score" in finals[0]
+        assert "sessionId" in finals[0]
+        assert finals[0]["needsReview"] is (review or status != "completed")
+        assert finals[0]["analysisStatus"] == status
+        assert "reviewReasons" in finals[0]
 
 
 class TestPersistAnalysisResult:
