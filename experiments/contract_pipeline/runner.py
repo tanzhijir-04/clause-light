@@ -299,7 +299,7 @@ async def _run(args, records, config, provider, model):
                                 model=model,
                                 temperature=EXPERIMENT_TEMPERATURE,
                                 input_text=input_text,
-                                elapsed_ms=int((time.monotonic() - analysis_started) * 1000),
+                                elapsed_ms=max(1, int((time.monotonic() - analysis_started) * 1000)),
                                 parse_elapsed_ms=parse_elapsed_ms,
                                 error_type=type(exc).__name__,
                                 call_records=_trace_dicts(trace_records),

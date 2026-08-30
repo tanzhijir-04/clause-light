@@ -228,9 +228,15 @@ async def test_timeout_is_written_as_a_complete_failed_result(tmp_path, monkeypa
     async def never_finishes(*args, **kwargs):
         await asyncio.sleep(0.05)
 
+    monotonic_values = iter((100.0, 100.0001))
     monkeypatch.setattr(runner, "ingest", fake_ingest)
     monkeypatch.setattr(runner, "ExperimentGateway", FakeGateway)
     monkeypatch.setattr(runner, "run_mode", never_finishes)
+    monkeypatch.setattr(
+        runner,
+        "time",
+        SimpleNamespace(monotonic=lambda: next(monotonic_values)),
+    )
 
     args = SimpleNamespace(output=str(output), include_failed=False)
     records = [{
@@ -262,7 +268,7 @@ async def test_timeout_is_written_as_a_complete_failed_result(tmp_path, monkeypa
     assert item["clauses"] == []
     assert item["error_type"] == "TimeoutError"
     assert item["error_message"] == ""
-    assert item["elapsed_ms"] > 0
+    assert item["elapsed_ms"] == 1
     assert "真实正文不应被伪造" not in line
 
 
