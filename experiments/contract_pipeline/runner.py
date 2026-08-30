@@ -11,9 +11,18 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from experiments.contract_pipeline.baselines import run_mode
+from experiments.contract_pipeline.baselines import failed_result, run_mode
+from experiments.contract_pipeline.policy import (
+    EXPERIMENT_MAX_RETRIES,
+    EXPERIMENT_TEMPERATURE,
+    MODE_ORDER,
+    STRUCTURED_MODE,
+    ExperimentGateway,
+    rotate_modes,
+)
 from server.core.document_ingress import ingest
-from server.core.llm import LLMGateway
+from server.core.llm import LLMCallRecord, LLMGateway
+from server.core.workers.parser import normalize_contract_text
 
 FIELDS = {
     "sample_id", "input_path", "contract_type", "source_kind",
@@ -75,8 +84,8 @@ def load_manifest(path: str | Path, *, require_comparison_set: bool = True) -> l
             records.append(record)
     if require_comparison_set:
         counts = Counter(groups.values())
-        if len(groups) < 6 or any(counts[item] < 2 for item in CONTRACT_TYPES):
-            raise ValueError("comparison set requires at least 6 independent groups, with 2 rental, 2 labor, and 2 service groups")
+        if len(groups) != 6 or any(counts[item] != 2 for item in CONTRACT_TYPES):
+            raise ValueError("comparison set requires exactly 6 independent groups, with 2 rental, 2 labor, and 2 service groups")
     return records
 
 
@@ -86,8 +95,22 @@ def _load_config(path: str | Path) -> dict:
     modes = config.get("modes")
     if not isinstance(modes, list) or not modes or any(mode not in MODE_MAX_CALLS for mode in modes):
         raise ValueError("config.modes must contain valid experiment modes")
+    if tuple(modes) != MODE_ORDER:
+        raise ValueError("config.modes must use the frozen three-mode order")
     if type(config.get("runs_per_sample")) is not int or config["runs_per_sample"] < 1:
         raise ValueError("config.runs_per_sample must be a positive integer")
+    if config["runs_per_sample"] != 5:
+        raise ValueError("config.runs_per_sample must be 5 for the frozen comparison")
+    if config.get("temperature") != EXPERIMENT_TEMPERATURE:
+        raise ValueError("config.temperature must be 0.1 for the frozen experiment")
+    if config.get("max_retries") != EXPERIMENT_MAX_RETRIES:
+        raise ValueError("config.max_retries must be 0 for the frozen experiment")
+    if config.get("structured_mode") != STRUCTURED_MODE:
+        raise ValueError("config.structured_mode must be json_fallback for the frozen experiment")
+    if config.get("store_contract_text") is not False:
+        raise ValueError("config.store_contract_text must be false")
+    if not isinstance(config.get("timeout_seconds"), (int, float)) or config["timeout_seconds"] <= 0:
+        raise ValueError("config.timeout_seconds must be positive")
     return config
 
 
@@ -100,10 +123,9 @@ def _pricing_complete(pricing: object, provider: str, model: str) -> bool:
 
 def preflight(records: list[dict], config: dict, gateway: LLMGateway | None = None, *, allow_remote: bool = False) -> tuple[str, str, str]:
     if gateway is None:
-        gateway = LLMGateway(
+        gateway = ExperimentGateway(
             provider_lock=config.get("provider_lock") or None,
             model_lock=config.get("model_lock") or None,
-            structured_mode=config.get("structured_mode", "auto"),
         )
     plan = gateway.get_processing_plan(task="analysis")
     provider = config.get("provider_lock") or plan.provider
@@ -117,9 +139,18 @@ def preflight(records: list[dict], config: dict, gateway: LLMGateway | None = No
             raise ValueError("远程正式实验缺少与锁定 provider/model 匹配的完整官方价格快照")
     groups = len({record["independent_group"] for record in records})
     type_count = len({record["contract_type"] for record in records})
-    max_calls = sum(MODE_MAX_CALLS[mode] for mode in config["modes"]) * len(records) * config["runs_per_sample"]
+    planned_runs = len(records) * len(config["modes"]) * config["runs_per_sample"]
+    known_call_estimate = (
+        sum(MODE_MAX_CALLS[mode] for mode in config["modes"])
+        * len(records)
+        * config["runs_per_sample"]
+    )
     print(f"independent_groups={groups} contract_types={type_count} runs_per_sample={config['runs_per_sample']}")
-    print(f"provider={provider} model={model} processing_mode={plan.processing_mode} max_calls={max_calls}")
+    print(
+        f"provider={provider} model={model} processing_mode={plan.processing_mode} "
+        f"planned_runs={planned_runs} known_call_estimate={known_call_estimate}"
+    )
+    print("known_call_estimate_is_not_a_spend_cap=true retries=0_does_not_guarantee_no_server_side_charge=true")
     return provider, model, plan.processing_mode
 
 
@@ -134,9 +165,31 @@ def _existing_keys(path: Path, include_failed: bool) -> set[tuple]:
             except json.JSONDecodeError:
                 continue
             key = (item.get("experiment_id"), item.get("sample_id"), item.get("mode"), item.get("repeat_index"))
-            if include_failed or item.get("success"):
-                keys.add(key)
+            keys.add(key)
     return keys
+
+
+def _trace_dicts(records: list[LLMCallRecord]) -> list[dict]:
+    return [record.__dict__.copy() for record in records]
+
+
+def _protocol_failure(result, provider: str, model: str):
+    """将实际 trace 与预检锁定值比较；不泄露请求内容。"""
+    for record in getattr(result, "call_records", []):
+        if (
+            record.get("provider") != provider
+            or record.get("model") != model
+            or record.get("temperature") != EXPERIMENT_TEMPERATURE
+        ):
+            result.success = False
+            result.analysis_status = "failed"
+            result.overall_score = None
+            result.clauses = []
+            result.review_reasons = {"pipeline": ["ProtocolViolation"]}
+            result.error_type = "ProtocolViolation"
+            result.error_message = ""
+            return result
+    return result
 
 
 async def _run(args, records, config, provider, model):
@@ -148,43 +201,82 @@ async def _run(args, records, config, provider, model):
     existing = _existing_keys(output, args.include_failed)
     with output.open("a", encoding="utf-8") as handle:
         for record in records:
-            for mode in config["modes"]:
-                for repeat_index in range(1, config["runs_per_sample"] + 1):
+            parse_started = asyncio.get_running_loop().time()
+            document_result = None
+            input_text = ""
+            parse_error = None
+            try:
+                document_result = await ingest(record["input_path"])
+                input_text = normalize_contract_text(document_result.full_text)
+                if not input_text.strip():
+                    raise ValueError("document text is empty")
+                document_result.full_text = input_text
+            except Exception as exc:
+                parse_error = exc
+            parse_elapsed_ms = int((asyncio.get_running_loop().time() - parse_started) * 1000)
+
+            for repeat_index in range(1, config["runs_per_sample"] + 1):
+                for mode in rotate_modes(config["modes"], repeat_index):
                     # experiment_id is generated by the result; resume matching uses the stable tuple below.
                     stable_key = (experiment_id, record["sample_id"], mode, repeat_index)
                     if stable_key in existing:
                         continue
                     trace_records = []
-                    gateway = LLMGateway(
+                    gateway = ExperimentGateway(
                         trace_sink=trace_records.append,
                         provider_lock=provider,
                         model_lock=model,
-                        structured_mode=config.get("structured_mode", "auto"),
                     )
-                    if mode == "single_pass":
-                        try:
-                            input_text = (await ingest(record["input_path"])).full_text
-                        except Exception:
-                            input_text = Path(record["input_path"]).read_text(encoding="utf-8")
-                        result = await run_mode(
-                            mode, input_text, gateway,
+                    if parse_error is not None:
+                        result = failed_result(
                             sample_id=record["sample_id"],
                             independent_group=record["independent_group"],
+                            mode=mode,
                             repeat_index=repeat_index,
-                            temperature=config.get("temperature", 0.1),
+                            provider=provider,
+                            model=model,
+                            temperature=EXPERIMENT_TEMPERATURE,
+                            input_text=input_text,
+                            parse_elapsed_ms=parse_elapsed_ms,
+                            error_type=type(parse_error).__name__,
+                            call_records=_trace_dicts(trace_records),
                             pricing=config.get("pricing"),
                         )
                     else:
-                        result = await run_mode(
-                            mode, record["input_path"], gateway,
-                            sample_id=record["sample_id"],
-                            independent_group=record["independent_group"],
-                            repeat_index=repeat_index,
-                            temperature=config.get("temperature", 0.1),
-                            pricing=config.get("pricing"),
-                        )
+                        try:
+                            run_input = input_text if mode == "single_pass" else record["input_path"]
+                            run_kwargs = {
+                                "sample_id": record["sample_id"],
+                                "independent_group": record["independent_group"],
+                                "repeat_index": repeat_index,
+                                "temperature": EXPERIMENT_TEMPERATURE,
+                                "pricing": config.get("pricing"),
+                                "parse_elapsed_ms": parse_elapsed_ms,
+                            }
+                            if mode != "single_pass":
+                                run_kwargs["document_result"] = document_result
+                            result = await asyncio.wait_for(
+                                run_mode(mode, run_input, gateway, **run_kwargs),
+                                timeout=config["timeout_seconds"],
+                            )
+                        except Exception as exc:
+                            result = failed_result(
+                                sample_id=record["sample_id"],
+                                independent_group=record["independent_group"],
+                                mode=mode,
+                                repeat_index=repeat_index,
+                                provider=provider,
+                                model=model,
+                                temperature=EXPERIMENT_TEMPERATURE,
+                                input_text=input_text,
+                                parse_elapsed_ms=parse_elapsed_ms,
+                                error_type=type(exc).__name__,
+                                call_records=_trace_dicts(trace_records),
+                                pricing=config.get("pricing"),
+                            )
+                    result = _protocol_failure(result, provider, model)
                     result.experiment_id = experiment_id
-                    handle.write(json.dumps(result.to_dict(config.get("store_contract_text", False)), ensure_ascii=False) + "\n")
+                    handle.write(json.dumps(result.to_dict(False), ensure_ascii=False) + "\n")
                     handle.flush()
 
 

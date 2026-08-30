@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Callable
 
 from server.core import document_ingress
+from server.core.document_ingress import DocumentResult
 from server.core.knowledge import KnowledgeEngine
 from server.core.llm import LLMGateway, get_llm_gateway
 from server.core.ocr import OCREngine, get_ocr_engine
@@ -90,6 +91,8 @@ class ContractAgent:
         contract_type_hint: str | None = None,
         on_step: Callable | None = None,
         worker_mode: str = "parallel",
+        document_result: DocumentResult | None = None,
+        enable_memory: bool = True,
     ) -> AnalysisResult:
         """完整的三段式分析流程"""
 
@@ -129,9 +132,12 @@ class ContractAgent:
         await _notify(1, 5, "正在识别文字...")
         logger.info("文档解析开始")
         try:
-            doc_result = await self._retry(
-                lambda: document_ingress.ingest(file_path), "文档解析"
-            )
+            if document_result is not None:
+                doc_result = document_result
+            else:
+                doc_result = await self._retry(
+                    lambda: document_ingress.ingest(file_path), "文档解析"
+                )
             if not doc_result or not doc_result.full_text.strip():
                 logger.error("文档解析结果为空")
                 return _pipeline_failure("文档解析结果为空，无法分析")
@@ -255,50 +261,51 @@ class ContractAgent:
 
         # ── 记忆会话 + Loadout / Stage 上下文（失败降级为空）──
         memory_context = ""
-        try:
-            from server.core.agent_tools import build_loadout, build_stage_context
-            from server.core.memory.kernel import MemoryKernel
+        if enable_memory:
+            try:
+                from server.core.agent_tools import build_loadout, build_stage_context
+                from server.core.memory.kernel import MemoryKernel
 
-            async with async_session_factory() as db:
-                kernel = MemoryKernel(db)
-                session_id = await kernel.start_session(
-                    contract_id, parse_result.contract_type
-                )
-                result.session_id = session_id
-                await kernel.append_event(
-                    session_id,
-                    "step",
-                    {
-                        "name": "parse_done",
-                        "clauses": len(parse_result.clauses),
-                        "contract_type": parse_result.contract_type,
-                    },
-                )
-                query_text = full_text[:500]
-                loadout = await build_loadout(
-                    db,
-                    contract_type=parse_result.contract_type,
-                    query=query_text,
-                )
-                stage = await build_stage_context(
-                    db,
-                    contract_type=parse_result.contract_type,
-                    query=query_text,
-                    kb_rules=kb_rules,
-                )
-                parts = [p for p in (loadout, stage) if p and p.strip()]
-                memory_context = "\n\n".join(parts)
-                await kernel.append_event(
-                    session_id,
-                    "step",
-                    {
-                        "name": "memory_loadout",
-                        "chars": len(memory_context),
-                    },
-                )
-                await db.commit()
-        except Exception as e:
-            logger.warning("记忆装配失败，降级为空上下文: %s", e)
+                async with async_session_factory() as db:
+                    kernel = MemoryKernel(db)
+                    session_id = await kernel.start_session(
+                        contract_id, parse_result.contract_type
+                    )
+                    result.session_id = session_id
+                    await kernel.append_event(
+                        session_id,
+                        "step",
+                        {
+                            "name": "parse_done",
+                            "clauses": len(parse_result.clauses),
+                            "contract_type": parse_result.contract_type,
+                        },
+                    )
+                    query_text = full_text[:500]
+                    loadout = await build_loadout(
+                        db,
+                        contract_type=parse_result.contract_type,
+                        query=query_text,
+                    )
+                    stage = await build_stage_context(
+                        db,
+                        contract_type=parse_result.contract_type,
+                        query=query_text,
+                        kb_rules=kb_rules,
+                    )
+                    parts = [p for p in (loadout, stage) if p and p.strip()]
+                    memory_context = "\n\n".join(parts)
+                    await kernel.append_event(
+                        session_id,
+                        "step",
+                        {
+                            "name": "memory_loadout",
+                            "chars": len(memory_context),
+                        },
+                    )
+                    await db.commit()
+            except Exception as e:
+                logger.warning("记忆装配失败，降级为空上下文: %s", e)
 
         # ── Stage 2: 并行风险评估（含冲突解决） ──
         # Parser normally sanitizes this field; repeat the guard at the dispatch
@@ -443,7 +450,7 @@ class ContractAgent:
 
                 # 按需调用 memory/wiki/skill 工具（预算内）
                 conflict_memory = memory_context
-                if conflict_tool_budget > 0:
+                if enable_memory and conflict_tool_budget > 0:
                     try:
                         from server.core.agent_tools import run_conflict_tools
 
@@ -676,7 +683,8 @@ class ContractAgent:
         )
 
         # ── 结束后 Distill（await + 吞异常，不阻断主结果）──
-        await self._trigger_distill(result)
+        if enable_memory:
+            await self._trigger_distill(result)
 
         return result
 

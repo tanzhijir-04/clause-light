@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 
 from experiments.contract_pipeline.metrics import estimate_cost
 from server.core.agent import AnalysisResult, ContractAgent
-from server.core.document_ingress import ingest
+from server.core.document_ingress import DocumentResult, ingest
 from server.core.llm import LLMCallRecord, LLMGateway
 from server.core.workers.parser import normalize_contract_text
 
@@ -71,14 +71,52 @@ class ExperimentRunResult:
     input_sha256: str
     error_type: str = ""
     error_message: str = ""
+    parse_elapsed_ms: int = 0
 
     def to_dict(self, store_contract_text: bool = False) -> dict:
+        """序列化正式 raw 结果，只允许脱敏的协议字段。"""
         data = asdict(self)
-        if not store_contract_text:
-            for clause in data["clauses"]:
-                clause.pop("content", None)
-                clause.pop("text", None)
+        data["error_message"] = ""
+        data["clauses"] = [
+            {
+                key: clause.get(key)
+                for key in (
+                    "clause_number", "risk_level", "analysis_status",
+                    "needs_review", "source_start", "source_end",
+                )
+            }
+            for clause in data["clauses"]
+        ]
+        data["call_records"] = [
+            {
+                key: record.get(key)
+                for key in (
+                    "task", "provider", "model", "temperature", "attempt",
+                    "latency_ms", "input_tokens", "output_tokens", "tokens_used",
+                    "success", "structured_via", "error_type",
+                )
+                if key in record
+            }
+            for record in data["call_records"]
+        ]
+        data["review_reasons"] = _review_reason_counts(data["review_reasons"])
         return data
+
+
+_REVIEW_REASON_CODES = frozenset({
+    "pipeline", "parse", "worker", "conflict", "evaluation", "citation",
+    "location", "timeout", "structured_output",
+})
+
+
+def _review_reason_counts(reasons: dict[str, list[str]] | None) -> dict[str, int]:
+    """把内部原因折叠为固定代码和计数，避免泄露自由文本。"""
+    counts: dict[str, int] = {}
+    for code, values in (reasons or {}).items():
+        safe_code = code if code in _REVIEW_REASON_CODES else "pipeline"
+        count = len(values) if isinstance(values, list) else 1
+        counts[safe_code] = counts.get(safe_code, 0) + count
+    return counts
 
 
 def _now() -> str:
@@ -144,6 +182,7 @@ def _base_result(
     elapsed_ms: int, success: bool, analysis_status: str, overall_score: int | None,
     clauses: list[dict], review_reasons: dict[str, list[str]], call_records: list[dict],
     input_text: str, pricing: dict | None = None, error_type: str = "", error_message: str = "",
+    parse_elapsed_ms: int = 0,
 ) -> ExperimentRunResult:
     cost = estimate_cost(call_records, pricing)
     return ExperimentRunResult(
@@ -168,6 +207,38 @@ def _base_result(
         input_sha256=hashlib.sha256(input_text.encode("utf-8")).hexdigest(),
         error_type=error_type,
         error_message=error_message,
+        parse_elapsed_ms=parse_elapsed_ms,
+    )
+
+
+def failed_result(
+    *, sample_id: str, independent_group: str, mode: str, repeat_index: int,
+    provider: str, model: str, temperature: float, input_text: str,
+    parse_elapsed_ms: int = 0, elapsed_ms: int = 0, error_type: str,
+    call_records: list[dict] | None = None, pricing: dict | None = None,
+) -> ExperimentRunResult:
+    """为解析、超时或协议失败保留一个完整的计划键结果。"""
+    return _base_result(
+        sample_id=sample_id,
+        independent_group=independent_group,
+        mode=mode,
+        repeat_index=repeat_index,
+        provider=provider,
+        model=model,
+        temperature=temperature,
+        started_at=_now(),
+        elapsed_ms=elapsed_ms,
+        success=False,
+        analysis_status="failed",
+        overall_score=None,
+        clauses=[],
+        review_reasons={"pipeline": [error_type]},
+        call_records=call_records or [],
+        input_text=input_text,
+        pricing=pricing,
+        error_type=error_type,
+        error_message="",
+        parse_elapsed_ms=parse_elapsed_ms,
     )
 
 
@@ -180,8 +251,10 @@ async def run_single_pass(
     repeat_index: int = 1,
     temperature: float = 0.1,
     pricing: dict | None = None,
+    parse_elapsed_ms: int = 0,
 ) -> ExperimentRunResult:
     """One whole-document structured call; no KB, memory, workers or evaluator."""
+    normalized = normalize_contract_text(full_text)
     started_at = _now()
     start = time.monotonic()
     records: list[LLMCallRecord] = []
@@ -195,7 +268,7 @@ async def run_single_pass(
             # chat fallback would make it an unfair multi-call baseline.
             llm.structured_mode = "json_fallback"
         prompt_path = Path(__file__).resolve().parents[2] / "server" / "core" / "prompts" / "single_pass_review.txt"
-        prompt = prompt_path.read_text(encoding="utf-8") + "\n" + full_text
+        prompt = prompt_path.read_text(encoding="utf-8") + "\n" + normalized
         response = await llm.chat_structured(
             [{"role": "system", "content": prompt}],
             schema=SinglePassReviewSchema,
@@ -208,7 +281,6 @@ async def run_single_pass(
         parsed = response.parsed
         if not isinstance(parsed, SinglePassReviewSchema):
             raise ValueError("单次整文结构化结果校验失败")
-        normalized = normalize_contract_text(full_text)
         clauses = [_safe_clause_dict(item.model_dump()) for item in parsed.clauses]
         # Reuse the production locator semantics while keeping the baseline's schema independent.
         cursor = 0
@@ -237,7 +309,8 @@ async def run_single_pass(
             started_at=started_at, elapsed_ms=elapsed, success=True,
             analysis_status="completed", overall_score=parsed.overall_score,
             clauses=clauses, review_reasons=parsed.review_reasons,
-            call_records=[asdict(record) for record in records], input_text=full_text, pricing=pricing,
+            call_records=[asdict(record) for record in records], input_text=normalized, pricing=pricing,
+            parse_elapsed_ms=parse_elapsed_ms,
         )
     except Exception as exc:
         return _base_result(
@@ -245,8 +318,9 @@ async def run_single_pass(
             repeat_index=repeat_index, provider=provider, model=model, temperature=temperature,
             started_at=started_at, elapsed_ms=int((time.monotonic() - start) * 1000), success=False,
             analysis_status="failed", overall_score=None, clauses=[], review_reasons={"pipeline": [str(exc)]},
-            call_records=[asdict(record) for record in records], input_text=full_text, pricing=pricing,
-            error_type=type(exc).__name__, error_message=" ".join(str(exc).split())[:200],
+            call_records=[asdict(record) for record in records], input_text=normalized, pricing=pricing,
+            error_type=type(exc).__name__, error_message="",
+            parse_elapsed_ms=parse_elapsed_ms,
         )
     finally:
         if isinstance(llm, LLMGateway) and previous_structured_mode is not None:
@@ -263,23 +337,40 @@ async def _run_multi_stage(
     repeat_index: int = 1,
     temperature: float = 0.1,
     pricing: dict | None = None,
+    document_result: DocumentResult | None = None,
+    parse_elapsed_ms: int = 0,
 ) -> ExperimentRunResult:
-    started_at = _now()
-    started = time.monotonic()
     records: list[LLMCallRecord] = []
     attach_trace_sink(llm, records)
-    input_text = ""
     try:
-        input_text = (await ingest(input_path)).full_text
-    except Exception:
-        try:
-            input_text = Path(input_path).read_text(encoding="utf-8")
-        except Exception:
-            input_text = ""
+        if document_result is None:
+            document_result = await ingest(input_path)
+        input_text = normalize_contract_text(document_result.full_text)
+    except Exception as exc:
+        provider, model = _provider_model(llm, [])
+        return failed_result(
+            sample_id=sample_id,
+            independent_group=independent_group,
+            mode=mode,
+            repeat_index=repeat_index,
+            provider=provider,
+            model=model,
+            temperature=temperature,
+            input_text="",
+            parse_elapsed_ms=parse_elapsed_ms,
+            error_type=type(exc).__name__,
+            call_records=[asdict(record) for record in records],
+            pricing=pricing,
+        )
+    started_at = _now()
+    started = time.monotonic()
     provider, model = _provider_model(llm, [])
     try:
         result: AnalysisResult = await ContractAgent(llm=llm).analyze(
-            input_path, worker_mode="serial" if mode == "serial_multi_stage" else "parallel"
+            input_path,
+            worker_mode="serial" if mode == "serial_multi_stage" else "parallel",
+            document_result=document_result,
+            enable_memory=False,
         )
         provider = provider or getattr(result, "provider", "")
         clauses = [_safe_clause_dict(item) for item in result.clauses]
@@ -293,6 +384,7 @@ async def _run_multi_stage(
             call_records=[asdict(record) for record in records], input_text=input_text, pricing=pricing,
             error_type="" if result.analysis_status != "failed" else "AnalysisFailed",
             error_message=result.error,
+            parse_elapsed_ms=parse_elapsed_ms,
         )
     except Exception as exc:
         return _base_result(
@@ -301,7 +393,8 @@ async def _run_multi_stage(
             started_at=started_at, elapsed_ms=int((time.monotonic() - started) * 1000), success=False,
             analysis_status="failed", overall_score=None, clauses=[], review_reasons={"pipeline": [str(exc)]},
             call_records=[asdict(record) for record in records], input_text=input_text, pricing=pricing,
-            error_type=type(exc).__name__, error_message=" ".join(str(exc).split())[:200],
+            error_type=type(exc).__name__, error_message="",
+            parse_elapsed_ms=parse_elapsed_ms,
         )
 
 
