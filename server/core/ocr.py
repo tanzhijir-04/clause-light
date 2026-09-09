@@ -296,9 +296,11 @@ class OCREngine:
             except OSError:
                 pass
         if image_paths:
-            temp_dir = str(Path(image_paths[0]).parent)
+            temp_dir = Path(image_paths[0]).parent
+            if not temp_dir.name.startswith("clause_ocr_"):
+                return
             try:
-                shutil.rmtree(temp_dir, ignore_errors=True)
+                shutil.rmtree(str(temp_dir), ignore_errors=True)
             except OSError:
                 pass
 

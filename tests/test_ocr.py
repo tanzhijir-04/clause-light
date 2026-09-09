@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
@@ -512,14 +514,29 @@ class TestCleanup:
     def test_cleanup_images_success(self):
         """测试成功清理临时图片"""
         engine = OCREngine()
+        image_paths = [
+            "/tmp/clause_ocr_123/img1.png",
+            "/tmp/clause_ocr_123/img2.png",
+        ]
 
         with patch("pathlib.Path.unlink") as mock_unlink, patch(
             "shutil.rmtree"
         ) as mock_rmtree:
-            engine._cleanup_images(["/tmp/img1.png", "/tmp/img2.png"])
+            engine._cleanup_images(image_paths)
 
             assert mock_unlink.call_count == 2
-            mock_rmtree.assert_called_once()
+            mock_rmtree.assert_called_once_with(
+                str(Path(image_paths[0]).parent), ignore_errors=True
+            )
+
+    def test_cleanup_images_does_not_remove_arbitrary_parent(self):
+        """只删除 OCR 自建目录，不能递归删除调用方目录。"""
+        engine = OCREngine()
+
+        with patch("pathlib.Path.unlink"), patch("shutil.rmtree") as mock_rmtree:
+            engine._cleanup_images(["/tmp/img1.png"])
+
+            mock_rmtree.assert_not_called()
 
     def test_cleanup_images_empty(self):
         """测试清理空列表"""
