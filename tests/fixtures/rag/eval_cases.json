@@ -1,0 +1,89 @@
+[
+  {
+    "case_id": "civil-contract-form-001",
+    "query": "电子数据交换视为书面形式",
+    "expected_sources": [
+      {
+        "source_key": "shared/laws/civil_code.json",
+        "source_ref": "第四百六十九条"
+      }
+    ],
+    "k": 5
+  },
+  {
+    "case_id": "civil-contract-content-001",
+    "query": "合同内容一般包括违约责任",
+    "expected_sources": [
+      {
+        "source_key": "shared/laws/civil_code.json",
+        "source_ref": "第四百七十条"
+      }
+    ],
+    "k": 5
+  },
+  {
+    "case_id": "civil-breach-001",
+    "query": "不履行合同义务承担违约责任",
+    "expected_sources": [
+      {
+        "source_key": "shared/laws/civil_code.json",
+        "source_ref": "第五百七十七条"
+      }
+    ],
+    "k": 5
+  },
+  {
+    "case_id": "labor-required-terms-001",
+    "query": "劳动合同必备条款",
+    "expected_sources": [
+      {
+        "source_key": "shared/laws/labor_law.json",
+        "source_ref": "第十七条"
+      }
+    ],
+    "k": 5
+  },
+  {
+    "case_id": "labor-probation-001",
+    "query": "试用期法定上限",
+    "expected_sources": [
+      {
+        "source_key": "shared/laws/labor_law.json",
+        "source_ref": "第十九条"
+      },
+      {
+        "source_key": "shared/rules/labor.json",
+        "source_ref": "劳动规则第3条"
+      }
+    ],
+    "k": 5
+  },
+  {
+    "case_id": "rental-deposit-001",
+    "query": "押金超过两个月租金",
+    "expected_sources": [
+      {
+        "source_key": "shared/rules/rental.json",
+        "source_ref": "租赁规则第1条"
+      }
+    ],
+    "k": 5
+  },
+  {
+    "case_id": "labor-compensation-001",
+    "query": "竞业限制补偿金",
+    "expected_sources": [
+      {
+        "source_key": "shared/rules/labor.json",
+        "source_ref": "劳动规则第1条"
+      }
+    ],
+    "k": 5
+  },
+  {
+    "case_id": "empty-result-001",
+    "query": "不存在的法规主题",
+    "expected_sources": [],
+    "k": 5
+  }
+]
