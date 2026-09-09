@@ -38,12 +38,6 @@ async def lifespan(app: FastAPI):
     os.makedirs("data", exist_ok=True)
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 
-    # 初始化数据库
-    from server.models.database import init_db
-
-    await init_db()
-    logger.info("数据库初始化完成")
-
     # 导入基础规则（如果知识库为空）
     await _init_default_rules()
 
@@ -242,6 +236,7 @@ from server.api.sync import router as sync_router
 from server.api.wiki import router as wiki_router
 from server.api.ws import router as ws_router
 from server.api.connection import router as connection_router
+from server.api.v2 import router as v2_router
 
 app.include_router(contracts_router)
 app.include_router(chat_router)
@@ -253,6 +248,7 @@ app.include_router(models_router)
 app.include_router(sync_router)
 app.include_router(ws_router)
 app.include_router(connection_router)
+app.include_router(v2_router)
 
 
 # ── LLM 配置接口 ──

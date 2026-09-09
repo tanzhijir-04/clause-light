@@ -19,6 +19,7 @@ from sqlalchemy import (
     func,
     inspect,
 )
+from sqlalchemy.ext.asyncio import AsyncSession  # noqa: F401  兼容 v1 模块导入
 
 from server.config import settings
 from server.models.base import Base
