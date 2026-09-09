@@ -1,0 +1,29 @@
+M1-A 专项测试：
+python -m pytest (Get-ChildItem tests/v2/test_rag_*.py).FullName -q --no-cov
+25 passed, 1 warning in 7.24s
+
+M1-A 静态检查：
+ruff check server/modules/rag scripts/ingest_m1_sources.py (Get-ChildItem tests/v2/test_rag_*.py).FullName
+All checks passed!
+
+迁移头检查：
+python -m alembic heads
+20260909_0002 (head)
+
+全项目回归：
+python -m pytest -q --no-cov
+393 passed, 5 skipped, 9 warnings in 100.50s (0:01:40)
+
+真实源目录 dry-run：
+python scripts/ingest_m1_sources.py --source-dir shared --dry-run
+{
+  "status": "dry_run",
+  "source_files": 7,
+  "records": 79,
+  "chunks": 79,
+  "created_documents": 0,
+  "skipped_documents": 0,
+  "errors": []
+}
+
+说明：正式摄取回归在 pytest 临时 SQLite 数据库上执行 Alembic、正式摄取和重复摄取，首次创建 2 个文档，第二次跳过 2 个文档；临时目录由 pytest 清理。
