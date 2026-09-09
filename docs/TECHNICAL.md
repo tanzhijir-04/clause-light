@@ -74,6 +74,21 @@ class Settings:
 
 详细表结构见 PRD 第六章 4.1 节。
 
+### 1.3 ContractOps 2.0 M0 运行拓扑
+
+开发环境保留 SQLite 兼容 v1；M0 的 Docker Compose 使用 PostgreSQL 16、Redis 7、API 和独立 Worker。PostgreSQL 是合同、版本、任务、Outbox、租户和审计的事实来源；Redis 只承载限流、进度广播等可重建状态，断开时按配置降级，不取代数据库。Kafka 不属于 M0 运行依赖。
+
+迁移由 Alembic 执行，容器先等待 PostgreSQL 健康，再运行 `migrate`，API/Worker 依赖迁移成功后启动：
+
+```powershell
+docker compose -f docker/docker-compose.yml up --build -d
+docker compose -f docker/docker-compose.yml run --rm migrate
+python scripts/verify_m0.py
+python scripts/import_v1_sqlite.py --source data/clause_light.db --dry-run
+```
+
+v1 导入前应复制 `data/clause_light.db` 并保存 SHA-256；`scripts/import_v1_sqlite.py` 以只读方式打开源库，dry-run 和正式导入均输出计数守恒报告。回滚时停止 M0 服务、恢复备份 SQLite，并执行 `git switch main` 后按 v1 启动命令运行。M0 的 `verify_m0.py` 输出迁移耗时、任务状态、审计计数、重复副作用和隐私违规计数，便于形成交付数据。
+
 ### 1.3 LLM 网关（server/core/llm.py）
 
 统一的 LLM 调用层，所有 LLM 交互必须通过此模块。

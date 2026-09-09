@@ -8,7 +8,7 @@ import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -218,6 +218,28 @@ app.add_middleware(BaseHTTPMiddleware, dispatch=auth_middleware)
 from server.platform.observability import configure_observability
 
 configure_observability(app)
+
+
+@app.get("/health", include_in_schema=False)
+async def health() -> dict[str, str]:
+    """返回数据库和 Redis 的就绪状态，供容器编排和 smoke test 使用。"""
+    from server.platform.database import database_is_ready
+    from server.platform.redis import create_redis_client
+
+    database_ready = await database_is_ready()
+    redis_ready = False
+    try:
+        redis_client = await create_redis_client()
+        if redis_client is not None:
+            redis_ready = True
+            await redis_client.aclose()
+    except Exception:
+        redis_ready = False
+    return {
+        "status": "ready" if database_ready and redis_ready else "not_ready",
+        "database": "ready" if database_ready else "not_ready",
+        "redis": "ready" if redis_ready else "not_ready",
+    }
 
 
 # ── 注册路由 ──

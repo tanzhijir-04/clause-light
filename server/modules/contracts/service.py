@@ -15,6 +15,7 @@ from server.modules.events.envelope import EventEnvelope
 from server.modules.events.models import OutboxEvent
 from server.modules.events.outbox import append_outbox
 from server.modules.jobs.models import ProcessingJob
+from server.platform.observability import record_job
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,7 @@ class ContractService:
                     ),
                 )
                 await self.session.flush()
+                record_job(job.job_type, job.status)
         except IntegrityError:
             existing = await self.repository.get_job_by_idempotency(
                 organization_id, idempotency_key

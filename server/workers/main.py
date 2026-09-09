@@ -12,6 +12,7 @@ from server.config import settings
 from server.modules.jobs.models import ProcessingJob
 from server.modules.jobs.repository import JobRepository
 from server.platform.database import session_scope
+from server.platform.observability import record_job, record_job_failure
 from server.workers.errors import RetryableJobError
 
 
@@ -49,12 +50,16 @@ async def run_once(worker_id: str) -> bool:
         handler = HANDLERS.get(job.job_type)
         if handler is None:
             await repository.fail(job, "HANDLER_NOT_FOUND")
+            record_job(job.job_type, job.status)
+            record_job_failure(job.job_type)
             return True
         try:
             await handler(job, session)
             await repository.complete(job)
+            record_job(job.job_type, job.status)
         except RetryableJobError as error:
             await repository.retry(job, error.code)
+            record_job(job.job_type, job.status)
         except Exception as error:
             logger.exception(
                 "任务失败: job_id=%s error_type=%s",
@@ -62,6 +67,8 @@ async def run_once(worker_id: str) -> bool:
                 type(error).__name__,
             )
             await repository.fail(job, type(error).__name__)
+            record_job(job.job_type, job.status)
+            record_job_failure(job.job_type)
         return True
 
 

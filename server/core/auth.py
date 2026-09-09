@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 _EXEMPT_PATHS: set[str] = {
     "/",
     "/health",
+    "/metrics",
     "/api/connection/health",
 }
 

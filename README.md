@@ -183,7 +183,36 @@ A: 租赁、劳动、装修、外包、借款、服务等常见合同类型。
 - 后端：Python + FastAPI + SQLAlchemy
 - 前端：纯 HTML/CSS/JS（无框架）
 - AI：OpenAI 兼容 API / Ollama
-- 数据库：SQLite
+- 数据库：SQLite（本地开发）/ PostgreSQL 16（M0 Compose）
+
+## ContractOps 2.0 M0
+
+M0 将合同、不可变版本、持久任务、事务 Outbox、租户 API Key 和脱敏审计落到统一底座。SQLite 仍用于本地兼容开发；容器部署使用 PostgreSQL 16 和 Redis 7。Kafka 不属于 M0 运行依赖。
+
+### Docker 启动与验收
+
+```powershell
+docker compose -f docker/docker-compose.yml up --build -d
+docker compose -f docker/docker-compose.yml run --rm migrate
+python scripts/verify_m0.py
+python scripts/import_v1_sqlite.py --source data/clause_light.db --dry-run
+```
+
+验收脚本输出 JSON，检查迁移版本、PostgreSQL/Redis、重复请求副作用、Worker 任务状态和日志隐私。停止服务时保留 PostgreSQL 命名卷：
+
+```powershell
+docker compose -f docker/docker-compose.yml down
+```
+
+### v1 数据备份与回滚
+
+正式导入前先复制 SQLite 源文件并保留 SHA-256；导入器默认只读源库，建议先执行 `--dry-run`。需要回到 v1 时，停止 M0 服务、恢复备份的 `data/clause_light.db`，再切换到 `main` 分支启动旧版服务：
+
+```powershell
+Copy-Item data/clause_light.db data/clause_light.db.bak
+git switch main
+python -m server.main
+```
 
 ---
 

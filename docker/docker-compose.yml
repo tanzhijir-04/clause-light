@@ -1,16 +1,78 @@
-version: "3.8"
-
 services:
-  clause-light:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: clauselight
+      POSTGRES_USER: clauselight
+      POSTGRES_PASSWORD: clauselight
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clauselight -d clauselight"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - clauselight-pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    environment: &clauselight-environment
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+asyncpg://clauselight:clauselight@postgres:5432/clauselight
+      REDIS_URL: redis://redis:6379/0
+      REDIS_REQUIRED: "true"
+      AUTH_PEPPER: compose-m0-test-pepper
+      OCR_AUTO_DOWNLOAD: "false"
+      METRICS_ENABLED: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: ["python", "-m", "server.main"]
+    environment: *clauselight-environment
     ports:
       - "8080:8080"
     volumes:
       - ../data:/app/data
-      - ../shared:/app/shared
-      - ../asset:/app/asset
-    env_file:
-      - ../.env
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: ["python", "-m", "server.workers.main"]
+    environment: *clauselight-environment
+    volumes:
+      - ../data:/app/data
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+volumes:
+  clauselight-pgdata:
