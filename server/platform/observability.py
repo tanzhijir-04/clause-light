@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
+from starlette.routing import Match
 
 from server.config import settings
 
@@ -49,7 +50,19 @@ JOB_FAILURES.labels("unknown")
 def _route_template(request: Request) -> str:
     """获取稳定的路由模板，避免把动态 ID 放进 Prometheus 标签。"""
     route = request.scope.get("route")
-    return getattr(route, "path", None) or "unmatched"
+    route_path = getattr(route, "path", None)
+    if route_path:
+        return route_path
+
+    # 新版 Starlette 在中间件执行阶段可能尚未写入 scope["route"]，
+    # 从应用路由表匹配完整路径，仍然只记录模板而不是动态参数。
+    for candidate in request.app.routes:
+        match, _ = candidate.matches(request.scope)
+        if match is Match.FULL:
+            route_path = getattr(candidate, "path", None)
+            if route_path:
+                return route_path
+    return "unmatched"
 
 
 def record_job(job_type: str, status: str) -> None:

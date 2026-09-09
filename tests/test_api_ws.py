@@ -6,6 +6,7 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -29,7 +30,8 @@ def ws_client():
     """
     import asyncio
 
-    from server.main import app
+    test_app = FastAPI()
+    test_app.include_router(ws_module.router)
 
     # 在内存数据库中创建表（同步方式）
     loop = asyncio.new_event_loop()
@@ -44,7 +46,7 @@ def ws_client():
     original_factory = ws_module.async_session_factory
     ws_module.async_session_factory = _ws_test_session_factory
 
-    with TestClient(app) as client:
+    with TestClient(test_app) as client:
         yield client
 
     # 恢复原始工厂
