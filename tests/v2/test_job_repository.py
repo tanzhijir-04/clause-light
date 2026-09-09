@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -11,7 +11,7 @@ from server.modules.jobs.repository import JobRepository
 async def test_expired_lease_can_be_reclaimed(v2_session, queued_job) -> None:
     queued_job.status = "running"
     queued_job.lease_owner = "dead-worker"
-    queued_job.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    queued_job.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
     await v2_session.flush()
 
     claimed = await JobRepository(v2_session).claim_next(

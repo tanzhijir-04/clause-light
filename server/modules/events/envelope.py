@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field
 
@@ -15,5 +15,5 @@ class EventEnvelope(BaseModel):
     organization_id: uuid.UUID
     aggregate_type: str
     aggregate_id: uuid.UUID
-    occurred_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    occurred_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     payload: dict

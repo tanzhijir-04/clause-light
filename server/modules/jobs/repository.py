@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,7 +19,7 @@ class JobRepository:
 
     async def claim_next(self, worker_id: str, lease_seconds: int) -> ProcessingJob | None:
         """领取一个排队任务，或回收已过期的运行中任务。"""
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         statement = (
             select(ProcessingJob)
             .where(

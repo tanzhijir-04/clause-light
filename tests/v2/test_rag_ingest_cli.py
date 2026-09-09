@@ -69,6 +69,7 @@ def test_formal_ingest_works_after_migration_and_is_idempotent(tmp_path):
     database_path = tmp_path / "m1a.db"
     database_url = "sqlite+aiosqlite:///" + database_path.as_posix()
     environment = os.environ.copy()
+    environment["ENVIRONMENT"] = "development"
     environment["DATABASE_URL"] = database_url
     subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],

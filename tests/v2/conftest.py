@@ -7,6 +7,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from server.config import settings
 from server.models.base import Base
 from server.modules.jobs.models import ProcessingJob
 from server.modules.tenancy.auth import digest_api_key
@@ -51,7 +52,7 @@ async def org_api_key(v2_session: AsyncSession) -> str:
             organization_id=organization.id,
             name="test credential",
             key_prefix=secret[:16],
-            key_digest=digest_api_key(secret, "development-only-change-me"),
+            key_digest=digest_api_key(secret, settings.AUTH_PEPPER),
         )
     )
     await v2_session.flush()
