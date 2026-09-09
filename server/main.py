@@ -8,7 +8,7 @@ import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -213,15 +213,11 @@ from server.core.auth import auth_middleware
 
 app.add_middleware(BaseHTTPMiddleware, dispatch=auth_middleware)
 
-# ── 请求日志 ──
+# ── 请求追踪与指标 ──
 
+from server.platform.observability import configure_observability
 
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    """请求日志"""
-    logger.debug("%s %s", request.method, request.url.path)
-    response = await call_next(request)
-    return response
+configure_observability(app)
 
 
 # ── 注册路由 ──

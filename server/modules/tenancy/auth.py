@@ -7,7 +7,7 @@ import hmac
 import uuid
 from dataclasses import dataclass
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -67,8 +67,11 @@ async def authenticate_api_key(
 
 
 async def require_tenant(
+    request: Request,
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
     db: AsyncSession = Depends(get_db),
 ) -> TenantContext:
     """FastAPI v2 路由的租户依赖。"""
-    return await authenticate_api_key(x_api_key, db)
+    context = await authenticate_api_key(x_api_key, db)
+    request.state.organization_id = str(context.organization_id)
+    return context
