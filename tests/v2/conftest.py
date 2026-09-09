@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import sqlite3
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -69,3 +70,72 @@ async def v2_client(v2_session: AsyncSession):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
     app.dependency_overrides.pop(get_db, None)
+
+
+@pytest_asyncio.fixture
+def v1_sqlite_path(tmp_path):
+    path = tmp_path / "v1.db"
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE contracts (
+            id VARCHAR PRIMARY KEY,
+            title VARCHAR NOT NULL,
+            type VARCHAR NOT NULL,
+            source_file VARCHAR,
+            ocr_text TEXT,
+            ocr_raw TEXT,
+            created_at DATETIME,
+            updated_at DATETIME
+        );
+        CREATE TABLE analyses (
+            id VARCHAR PRIMARY KEY,
+            contract_id VARCHAR NOT NULL,
+            model_used VARCHAR,
+            overall_score INTEGER,
+            summary TEXT,
+            recommendation VARCHAR,
+            raw_result TEXT,
+            source VARCHAR,
+            created_at DATETIME,
+            status VARCHAR,
+            review_required BOOLEAN,
+            review_reason TEXT,
+            processing_mode VARCHAR
+        );
+        CREATE TABLE clause_analyses (
+            id VARCHAR PRIMARY KEY,
+            analysis_id VARCHAR NOT NULL,
+            clause_number VARCHAR,
+            clause_title VARCHAR,
+            clause_content TEXT,
+            risk_level VARCHAR,
+            risk_type VARCHAR,
+            risk_summary TEXT,
+            plain_explanation TEXT,
+            legal_basis TEXT,
+            severity_score INTEGER,
+            suggested_clause TEXT,
+            can_negotiate BOOLEAN,
+            user_feedback VARCHAR,
+            created_at DATETIME,
+            analysis_status VARCHAR,
+            review_required BOOLEAN,
+            review_reason TEXT,
+            source_start INTEGER,
+            source_end INTEGER,
+            citation_ids TEXT
+        );
+        INSERT INTO contracts(id, title, type, ocr_text) VALUES
+            ('legacy-contract-1', '采购合同', '采购合同', '正文不会进入拒绝报告');
+        INSERT INTO analyses(id, contract_id, summary) VALUES
+            ('legacy-analysis-1', 'legacy-contract-1', '摘要');
+        INSERT INTO clause_analyses(id, analysis_id, clause_number, clause_content) VALUES
+            ('legacy-clause-1', 'legacy-analysis-1', '第一条', '条款正文');
+        INSERT INTO analyses(id, contract_id, summary) VALUES
+            ('legacy-analysis-bad', 'missing-contract', '错误摘要');
+        """
+    )
+    connection.commit()
+    connection.close()
+    return path
