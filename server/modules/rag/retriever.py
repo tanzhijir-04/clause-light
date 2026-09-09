@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 import uuid
 from collections.abc import Sequence
@@ -14,6 +15,7 @@ from server.modules.rag.schemas import (
     EmbeddingProvider,
     RetrievalContext,
     RetrievalHit,
+    RetrievalTrace,
 )
 
 
@@ -63,6 +65,9 @@ def _citation(chunk, document) -> Citation | None:
     if chunk.source_start < 0 or chunk.source_end <= chunk.source_start:
         return None
     if len(chunk.content_sha256) != 64:
+        return None
+    expected_hash = hashlib.sha256(chunk.content.encode("utf-8")).hexdigest()
+    if chunk.content_sha256 != expected_hash:
         return None
     try:
         uuid.UUID(str(chunk.id))
@@ -119,13 +124,21 @@ class SQLiteRetriever:
             )
 
         entries = await self.repository.list_active_entries()
+        candidate_count = len(entries)
+        acl_filtered_count = 0
+        visible_count = 0
+        scored_count = 0
+        invalid_citation_count = 0
         candidates: list[tuple[float, object, object, Citation]] = []
         for chunk, document in entries:
             # ACL 必须在分数计算前完成，不能把不可见数据带入排序。
             if not _is_visible(chunk, document, context):
+                acl_filtered_count += 1
                 continue
+            visible_count += 1
             citation = _citation(chunk, document)
             if citation is None:
+                invalid_citation_count += 1
                 continue
             content = _normalize(chunk.content)
             heading = _normalize(chunk.heading or "")
@@ -139,6 +152,7 @@ class SQLiteRetriever:
             if isinstance(confidence, (int, float)):
                 score += max(0.0, min(float(confidence), 1.0)) * 0.1
             if score > 0:
+                scored_count += 1
                 candidates.append((score, chunk, document, citation))
 
         mode = "lexical"
@@ -174,10 +188,16 @@ class SQLiteRetriever:
         hits: list[RetrievalHit] = []
         seen_hashes: set[str] = set()
         total_chars = 0
+        duplicate_count = 0
+        budget_skipped_count = 0
         for score, chunk, _, citation in candidates:
-            if len(hits) >= top_k or chunk.content_sha256 in seen_hashes:
+            if chunk.content_sha256 in seen_hashes:
+                duplicate_count += 1
+                continue
+            if len(hits) >= top_k:
                 continue
             if total_chars + len(chunk.content) > token_budget:
+                budget_skipped_count += 1
                 continue
             hits.append(
                 RetrievalHit(
@@ -191,6 +211,17 @@ class SQLiteRetriever:
             total_chars += len(chunk.content)
 
         resolution = resolve_conflicts(hits)
+        trace = RetrievalTrace(
+            query_chars=len(normalized_query),
+            candidate_count=candidate_count,
+            acl_filtered_count=acl_filtered_count,
+            visible_count=visible_count,
+            scored_count=scored_count,
+            duplicate_count=duplicate_count,
+            budget_skipped_count=budget_skipped_count,
+            invalid_citation_count=invalid_citation_count,
+            returned_count=len(resolution.hits),
+        )
         return ContextPackage(
             query=normalized_query,
             hits=resolution.hits,
@@ -198,5 +229,6 @@ class SQLiteRetriever:
             degraded_mode=mode,
             degraded_reason=degraded_reason,
             conflict_detected=resolution.conflict_detected,
-            requires_human_review=resolution.requires_human_review,
+            requires_human_review=resolution.requires_human_review or invalid_citation_count > 0,
+            trace=trace,
         )

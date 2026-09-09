@@ -128,3 +128,57 @@ async def test_retriever_returns_empty_for_non_matching_query(v2_session):
     )
 
     assert package.hits == ()
+
+
+async def test_retrieval_trace_reports_filtering_and_budget(v2_session):
+    private_chunk = await _add_chunk(
+        v2_session,
+        content="组织 A 的私有违约责任规则",
+        source_label="[内部规则] org-a｜违约规则",
+        visibility="private",
+        organization_id=uuid.uuid4(),
+    )
+    await _add_chunk(
+        v2_session,
+        content="公共来源的违约责任规则",
+        source_label="[法律法规] 公共来源｜第一条",
+    )
+    await _add_chunk(
+        v2_session,
+        content="公共来源的违约责任规则",
+        source_label="[法律法规] 公共来源｜第二条",
+    )
+
+    package = await SQLiteRetriever(v2_session).retrieve(
+        "违约责任",
+        RetrievalContext(organization_id=uuid.uuid4()),
+        top_k=5,
+        token_budget=80,
+    )
+
+    assert package.trace.candidate_count >= package.trace.visible_count
+    assert package.trace.acl_filtered_count >= 1
+    assert all(hit.chunk_id != private_chunk.id for hit in package.hits)
+    assert package.trace.duplicate_count >= 1
+    assert package.trace.returned_count == len(package.hits)
+    assert package.trace.budget_skipped_count >= 0
+    assert package.trace.query_chars == len(package.query)
+
+
+async def test_invalid_content_hash_is_dropped_and_requires_review(v2_session):
+    chunk = await _add_chunk(
+        v2_session,
+        content="违约责任",
+        source_label="[法律法规] 测试法｜第一条",
+    )
+    chunk.content_sha256 = "0" * 64
+    await v2_session.flush()
+
+    package = await SQLiteRetriever(v2_session).retrieve(
+        "违约责任",
+        RetrievalContext(organization_id=None),
+    )
+
+    assert package.hits == ()
+    assert package.requires_human_review is True
+    assert package.trace.invalid_citation_count == 1

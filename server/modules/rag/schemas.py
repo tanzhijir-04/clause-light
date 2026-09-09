@@ -77,6 +77,21 @@ class RetrievalHit:
 
 
 @dataclass(frozen=True)
+class RetrievalTrace:
+    """检索过程的安全计数，不保存查询或知识正文。"""
+
+    query_chars: int = 0
+    candidate_count: int = 0
+    acl_filtered_count: int = 0
+    visible_count: int = 0
+    scored_count: int = 0
+    duplicate_count: int = 0
+    budget_skipped_count: int = 0
+    invalid_citation_count: int = 0
+    returned_count: int = 0
+
+
+@dataclass(frozen=True)
 class ContextPackage:
     """受预算限制、可直接交给后续审查链的上下文包。"""
 
@@ -87,6 +102,7 @@ class ContextPackage:
     degraded_reason: str | None = None
     conflict_detected: bool = False
     requires_human_review: bool = False
+    trace: RetrievalTrace = field(default_factory=RetrievalTrace)
 
 
 class EmbeddingProvider(Protocol):
