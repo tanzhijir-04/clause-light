@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 from server.modules.rag.schemas import RetrievalHit
 
-
 AUTHORITY_RANK = {
     "rule": 0,
     "organization_policy": 1,

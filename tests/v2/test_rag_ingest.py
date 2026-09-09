@@ -6,9 +6,7 @@ from pathlib import Path
 import pytest
 
 from server.modules.rag.ingest import KnowledgeIngestor, SourceValidationError
-from server.modules.rag.models import KnowledgeDocument
 from server.modules.rag.repository import KnowledgeRepository
-
 
 FIXTURE_ROOT = Path(__file__).parents[1] / "fixtures" / "rag"
 
