@@ -16,6 +16,7 @@ import server.modules.contracts.models  # noqa: F401  注册合同模型
 import server.modules.events.models  # noqa: F401  注册事件模型
 import server.modules.jobs.models  # noqa: F401  注册任务模型
 import server.modules.legacy_import.models  # noqa: F401  注册导入模型
+import server.modules.rag.models  # noqa: F401  注册 RAG 模型
 import server.modules.tenancy.models  # noqa: F401  注册租户模型
 
 
