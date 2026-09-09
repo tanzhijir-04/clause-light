@@ -62,6 +62,20 @@ def _route_template(request: Request) -> str:
             route_path = getattr(candidate, "path", None)
             if route_path:
                 return route_path
+
+    # Starlette 1.6 在中间件阶段可能无法用 matches() 还原路由，
+    # 用路由模板正则兼容，且不把动态参数值写进指标标签。
+    request_path = request.scope.get("path", "")
+    for candidate in request.app.routes:
+        route_path = getattr(candidate, "path", None)
+        route_regex = getattr(candidate, "path_regex", None)
+        methods = getattr(candidate, "methods", None)
+        if not route_path or route_regex is None:
+            continue
+        if methods and request.method not in methods:
+            continue
+        if route_regex.fullmatch(request_path):
+            return route_path
     return "unmatched"
 
 

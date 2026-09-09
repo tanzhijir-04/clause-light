@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 import re
+from types import SimpleNamespace
+
+from starlette.routing import Match
+
+from server.platform.observability import _route_template
 
 
 async def test_request_id_is_returned(v2_client, org_api_key) -> None:
@@ -29,3 +34,22 @@ async def test_metrics_expose_bounded_route_labels(v2_client, org_api_key) -> No
     assert 'route="/api/v2/tenancy/me"' in response.text
     assert "clauselight_jobs_total" in response.text
     assert not re.search(r"[0-9a-f]{32}", response.text)
+
+
+def test_route_template_falls_back_to_template_regex_when_route_is_deferred() -> None:
+    class DeferredRoute:
+        path = "/api/v2/contracts/{contract_id}"
+        methods = {"GET"}
+        path_regex = re.compile(r"^/api/v2/contracts/[^/]+$")
+
+        @staticmethod
+        def matches(scope):
+            return Match.NONE, {}
+
+    request = SimpleNamespace(
+        scope={"path": "/api/v2/contracts/0123456789abcdef0123456789abcdef"},
+        app=SimpleNamespace(routes=[DeferredRoute()]),
+        method="GET",
+    )
+
+    assert _route_template(request) == "/api/v2/contracts/{contract_id}"
