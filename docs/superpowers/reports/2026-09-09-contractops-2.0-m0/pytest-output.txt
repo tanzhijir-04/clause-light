@@ -1,0 +1,21 @@
+python -m pytest -q
+
+368 passed, 5 skipped, 9 warnings in 123.80s (0:02:03)
+
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.12.5-final-0 _______________
+
+Name                                       Stmts   Miss  Cover
+------------------------------------------------------------------------
+TOTAL                                       5367   1372    74%
+Coverage HTML written to dir htmlcov
+
+Warnings summary:
+- Starlette multipart PendingDeprecationWarning
+- Existing AsyncMock coroutine RuntimeWarning in legacy tests
+
+Skipped summary:
+- Docker M0 smoke test: M0_BASE_URL not configured
+- PostgreSQL worker claim integration: INTEGRATION_DATABASE_URL not configured
+- Redis rate-limit/progress integration: INTEGRATION_REDIS_URL not configured
+- Two optional Outlines tests: outlines dependency not installed
