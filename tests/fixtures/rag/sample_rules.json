@@ -1,0 +1,9 @@
+[
+  {
+    "category": "租赁",
+    "rule_text": "押金超过两个月租金的租赁合同应标记为高风险",
+    "trigger_keywords": ["押金", "保证金"],
+    "confidence": 0.88,
+    "source": "manual"
+  }
+]

@@ -1,0 +1,11 @@
+[
+  {
+    "law_name": "测试法",
+    "article_number": "第一条",
+    "content": "当事人应当按照约定履行义务。",
+    "effective_date": "2021-01-01",
+    "source_url": "https://example.invalid/law.pdf",
+    "verified_at": "2026-09-09",
+    "tags": ["履行"]
+  }
+]
