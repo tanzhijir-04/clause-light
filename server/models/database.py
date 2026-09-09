@@ -6,7 +6,6 @@ import json
 import logging
 import uuid
 from datetime import datetime, date
-from typing import AsyncGenerator
 
 from sqlalchemy import (
     Boolean,
@@ -20,19 +19,12 @@ from sqlalchemy import (
     func,
     inspect,
 )
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
 
 from server.config import settings
+from server.models.base import Base
+from server.platform.database import async_session_factory, engine, get_db
 
 logger = logging.getLogger(__name__)
-
-
-# ── 基类 ──
-
-
-class Base(DeclarativeBase):
-    pass
 
 
 # ── 模型 ──
@@ -335,12 +327,6 @@ class AssetAuditLog(Base):
     created_at = Column(DateTime, default=func.now())
 
 
-# ── 数据库引擎 ──
-
-engine = create_async_engine(settings.DATABASE_URL, echo=settings.DEBUG)
-async_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-
 async def init_db() -> None:
     """创建所有表，并补齐已有表的新增列"""
     async with engine.begin() as conn:
@@ -410,14 +396,3 @@ async def migrate_schema(engine) -> None:
 
     async with engine.begin() as conn:
         await conn.run_sync(_run)
-
-
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """FastAPI 依赖注入"""
-    async with async_session_factory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
