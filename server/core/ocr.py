@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import tempfile
 from dataclasses import dataclass, field
+from importlib.metadata import version
 from pathlib import Path
 
 from server.config import settings
@@ -14,6 +15,17 @@ logger = logging.getLogger(__name__)
 # PyMuPDF 提取文字的最低阈值：低于此长度认为是纯图片 PDF，需要 OCR
 PYMUPDF_MIN_TEXT_LEN = 100
 _PYMUPDF_MIN_TEXT_LEN = PYMUPDF_MIN_TEXT_LEN  # 兼容旧引用
+
+
+def ensure_supported_paddleocr_version() -> None:
+    """确保 OCR 封装使用 requirements.txt 锁定的 PaddleOCR 2.x API。"""
+    installed = version("paddleocr")
+    major = int(installed.split(".", maxsplit=1)[0])
+    if major != 2:
+        raise RuntimeError(
+            f"ClauseLight OCR requires paddleocr 2.x, installed={installed}. "
+            "Run: python -m pip install -r requirements.txt"
+        )
 
 
 @dataclass
@@ -49,6 +61,7 @@ class OCREngine:
     def _get_ocr(self):
         """延迟导入并初始化 PaddleOCR"""
         if self._ocr is None:
+            ensure_supported_paddleocr_version()
             from paddleocr import PaddleOCR
 
             # 构建模型路径

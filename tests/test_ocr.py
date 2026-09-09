@@ -9,7 +9,12 @@ from __future__ import annotations
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from server.core.ocr import OCREngine, OCRResult, get_ocr_engine
+from server.core.ocr import (
+    OCREngine,
+    OCRResult,
+    ensure_supported_paddleocr_version,
+    get_ocr_engine,
+)
 
 
 # ── OCRResult 数据类测试 ──
@@ -106,6 +111,12 @@ class TestPaddleAvailability:
                 engine._ocr_available = False
                 result = engine._is_paddle_available()
                 assert result is False
+
+    def test_rejects_paddleocr_3(self):
+        """锁定的 v2 构造参数不能静默运行在 PaddleOCR 3.x 上"""
+        with patch("server.core.ocr.version", return_value="3.7.0"):
+            with pytest.raises(RuntimeError, match="requires paddleocr 2.x"):
+                ensure_supported_paddleocr_version()
 
 
 # ── 图片识别测试 ──
