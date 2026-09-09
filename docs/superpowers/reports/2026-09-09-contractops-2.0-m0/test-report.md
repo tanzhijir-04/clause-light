@@ -23,7 +23,7 @@
 
 ## 警告
 
-本次有 9 条警告，主要是既有依赖弃用提示和测试中的 AsyncMock 协程警告；未导致测试失败。完整原始输出见 [`pytest-output.txt`](./pytest-output.txt)。
+本次有 9 条警告，主要是既有依赖弃用提示和测试中的 AsyncMock 协程警告；未导致测试失败。结果输出摘要见 [`pytest-output.txt`](./pytest-output.txt)。
 
 ## 覆盖率重点
 

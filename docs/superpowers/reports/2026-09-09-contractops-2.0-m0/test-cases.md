@@ -50,4 +50,4 @@
 - `tests/v2/`：ContractOps M0 单元及 API 测试。
 - `tests/integration/`：Docker M0、PostgreSQL、Redis 和 OCR 集成入口。
 
-完整的 pytest 终端输出见同目录的 `pytest-output.txt`；本清单中的测试源码即为实际执行的测试用例来源。
+pytest 的结果输出摘要见同目录的 `pytest-output.txt`；本清单中的测试源码即为实际执行的测试用例来源。
