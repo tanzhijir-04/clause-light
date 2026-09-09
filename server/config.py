@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
+
+
+Environment = Literal["development", "test", "production"]
 
 
 class Settings(BaseSettings):
@@ -13,9 +19,20 @@ class Settings(BaseSettings):
     PORT: int = 8080
     DEBUG: bool = False
 
-    # ── 数据库 ──
+    # ── 2.0 运行时 ──
+    ENVIRONMENT: Environment = "development"
+    # 开发环境保留 SQLite，生产环境由配置注入 PostgreSQL。
     DATABASE_URL: str = "sqlite+aiosqlite:///data/clause_light.db"
+    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_REQUIRED: bool = False
+    AUTH_PEPPER: str = "development-only-change-me"
+    JOB_LEASE_SECONDS: int = 60
+    JOB_POLL_INTERVAL_SECONDS: float = 1.0
+    OTEL_ENABLED: bool = False
+    OTEL_EXPORTER_OTLP_ENDPOINT: str = ""
+    METRICS_ENABLED: bool = True
 
+    # ── 数据库 ──
     # ── 文件存储 ──
     UPLOAD_DIR: str = "data/uploads"
     MAX_UPLOAD_SIZE: int = 20 * 1024 * 1024  # 20MB
@@ -61,6 +78,18 @@ class Settings(BaseSettings):
     LIGHT_RAG_ENABLED: bool = False
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+
+    @model_validator(mode="after")
+    def validate_runtime_dependencies(self) -> "Settings":
+        """生产环境必须显式配置事实数据库、凭据 Pepper 和必需的 Redis。"""
+        if self.ENVIRONMENT == "production":
+            if not self.DATABASE_URL.startswith("postgresql+"):
+                raise ValueError("production DATABASE_URL 必须使用 PostgreSQL async driver")
+            if self.REDIS_REQUIRED and not self.REDIS_URL:
+                raise ValueError("production REDIS_REQUIRED=true 时必须配置 REDIS_URL")
+            if self.AUTH_PEPPER == "development-only-change-me":
+                raise ValueError("production 必须设置 AUTH_PEPPER")
+        return self
 
 
 settings = Settings()
