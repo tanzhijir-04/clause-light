@@ -110,7 +110,13 @@ python scripts/ingest_m1_sources.py --source-dir shared --database-url sqlite+ai
 
 冲突只在源数据显式提供相同 `conflict_key` 且内容不同的时候成立。系统保留全部候选，按法律、官方指导、组织政策、内部规则的权威顺序及日期排序；无法消解时返回 `requires_human_review=true`，调用方不得据此输出绿色结论。
 
-### 1.5 LLM 网关（server/core/llm.py）
+### 1.5 M1-B 检索 Trace 与引用校验
+
+本地 Retriever 返回的 `ContextPackage.trace` 只包含检索阶段计数：查询字符数、候选数、ACL 过滤数、可见数、评分数、去重数、预算跳过数、无效引用数和最终命中数，不保存查询正文或知识正文。
+
+每个 Citation 都会重新计算 Chunk 正文的 SHA-256；摘要不一致的 Chunk 会被丢弃，并把 ContextPackage 标记为 `requires_human_review=true`。这保证后续风险结论不会引用已被篡改或元数据失配的正文。
+
+### 1.6 LLM 网关（server/core/llm.py）
 
 统一的 LLM 调用层，所有 LLM 交互必须通过此模块。
 
