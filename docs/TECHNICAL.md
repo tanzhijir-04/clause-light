@@ -89,7 +89,28 @@ python scripts/import_v1_sqlite.py --source data/clause_light.db --dry-run
 
 v1 导入前应复制 `data/clause_light.db` 并保存 SHA-256；`scripts/import_v1_sqlite.py` 以只读方式打开源库，dry-run 和正式导入均输出计数守恒报告。回滚时停止 M0 服务、恢复备份 SQLite，并执行 `git switch main` 后按 v1 启动命令运行。M0 的 `verify_m0.py` 输出迁移耗时、任务状态、审计计数、重复副作用和隐私违规计数，便于形成交付数据。
 
-### 1.3 LLM 网关（server/core/llm.py）
+### 1.4 M1-A 本地 RAG 基座
+
+M1-A 的第一阶段不依赖 Docker、PostgreSQL、Redis 或远端向量服务。法规与内部规则从 `shared/laws/*.json`、`shared/rules/*.json` 摄取到 `knowledge_documents` 和 `knowledge_chunks`，通过来源哈希保证幂等，并为每个 Chunk 保留来源类型、来源文件、来源条文、原文位置和主题标签。
+
+开发时先用 dry-run 检查源文件，不连接数据库：
+
+```powershell
+python scripts/ingest_m1_sources.py --source-dir shared --dry-run
+```
+
+正式摄取前必须先执行迁移；命令按文件提交事务，重复的来源哈希会跳过，内容变化会生成新版本并将旧版本标记为 `disabled`：
+
+```powershell
+alembic upgrade head
+python scripts/ingest_m1_sources.py --source-dir shared --database-url sqlite+aiosqlite:///data/clause_light.db
+```
+
+检索默认使用 SQLite 词法评分，ACL 过滤发生在排序前；本地 Embedding 作为可选增强，不可用时会明确返回 `degraded_mode=lexical`。来源证据使用独立的 `source_label`，例如 `[法律法规] 中华人民共和国民法典｜第四百六十九条`；原 JSON 的 `tags` 和规则的 `trigger_keywords` 只进入 `topic_tags`，不冒充法律来源。
+
+冲突只在源数据显式提供相同 `conflict_key` 且内容不同的时候成立。系统保留全部候选，按法律、官方指导、组织政策、内部规则的权威顺序及日期排序；无法消解时返回 `requires_human_review=true`，调用方不得据此输出绿色结论。
+
+### 1.5 LLM 网关（server/core/llm.py）
 
 统一的 LLM 调用层，所有 LLM 交互必须通过此模块。
 
@@ -133,7 +154,7 @@ class LLMResponse:
 主模型失败 → 重试（换 temperature）→ 再失败 → 切换备用模型 → 再失败 → 返回错误
 ```
 
-### 1.4 Prompt 模板（server/core/prompts/）
+### 1.6 Prompt 模板（server/core/prompts/）
 
 每个 prompt 模板是一个 Python 函数，接收参数返回 messages 列表。
 

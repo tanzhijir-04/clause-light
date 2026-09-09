@@ -214,6 +214,27 @@ git switch main
 python -m server.main
 ```
 
+## M1-A 本地知识库摄取
+
+M1-A 先使用本地 SQLite 完成法规和内部规则的结构化摄取、分块、来源引用与词法检索，不要求 Docker、PostgreSQL、Redis 或远端服务。当前只读取 `shared/laws/*.json` 和 `shared/rules/*.json`，不会自动导入 v1 历史合同数据。
+
+先执行只读检查：
+
+```powershell
+python scripts/ingest_m1_sources.py --source-dir shared --dry-run
+```
+
+确认源文件计数和分块计数后，再对已经完成迁移的本地数据库执行正式摄取：
+
+```powershell
+alembic upgrade head
+python scripts/ingest_m1_sources.py `
+  --source-dir shared `
+  --database-url sqlite+aiosqlite:///data/clause_light.db
+```
+
+源标签和主题标签是两个字段：`[法律法规]` / `[内部规则]` 标签表示证据来源，原 JSON 中的 `tags` 或 `trigger_keywords` 只用于主题检索。相同来源重复执行会跳过；来源内容变化会保留旧版本并停用旧版本，不会静默覆盖。
+
 ---
 
 ## 技术细节
