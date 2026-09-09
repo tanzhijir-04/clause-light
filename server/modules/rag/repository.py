@@ -61,3 +61,15 @@ class KnowledgeRepository:
             .order_by(KnowledgeChunk.document_id, KnowledgeChunk.ordinal)
         )
         return list(result.scalars().all())
+
+    async def list_active_entries(
+        self,
+    ) -> list[tuple[KnowledgeChunk, KnowledgeDocument]]:
+        """返回活动文档和 Chunk，供检索器构造完整 Citation。"""
+        result = await self.session.execute(
+            select(KnowledgeChunk, KnowledgeDocument)
+            .join(KnowledgeDocument, KnowledgeDocument.id == KnowledgeChunk.document_id)
+            .where(KnowledgeDocument.status == "active")
+            .order_by(KnowledgeChunk.document_id, KnowledgeChunk.ordinal)
+        )
+        return list(result.all())
