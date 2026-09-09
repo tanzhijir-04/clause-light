@@ -6,6 +6,7 @@ import math
 import uuid
 from collections.abc import Sequence
 
+from server.modules.rag.conflicts import resolve_conflicts
 from server.modules.rag.repository import KnowledgeRepository
 from server.modules.rag.schemas import (
     Citation,
@@ -75,6 +76,22 @@ def _citation(chunk, document) -> Citation | None:
         source_start=chunk.source_start,
         source_end=chunk.source_end,
         content_sha256=chunk.content_sha256,
+        source_type=str(metadata.get("source_type", "")),
+        conflict_key=(
+            str(metadata["conflict_key"])
+            if metadata.get("conflict_key") is not None
+            else None
+        ),
+        effective_date=(
+            str(metadata["effective_date"])
+            if metadata.get("effective_date") is not None
+            else None
+        ),
+        verified_at=(
+            str(metadata["verified_at"])
+            if metadata.get("verified_at") is not None
+            else None
+        ),
     )
 
 
@@ -173,10 +190,13 @@ class SQLiteRetriever:
             seen_hashes.add(chunk.content_sha256)
             total_chars += len(chunk.content)
 
+        resolution = resolve_conflicts(hits)
         return ContextPackage(
             query=normalized_query,
-            hits=tuple(hits),
+            hits=resolution.hits,
             total_chars=total_chars,
             degraded_mode=mode,
             degraded_reason=degraded_reason,
+            conflict_detected=resolution.conflict_detected,
+            requires_human_review=resolution.requires_human_review,
         )

@@ -60,6 +60,10 @@ class Citation:
     source_start: int
     source_end: int
     content_sha256: str
+    source_type: str = ""
+    conflict_key: str | None = None
+    effective_date: str | None = None
+    verified_at: str | None = None
 
 
 @dataclass(frozen=True)
