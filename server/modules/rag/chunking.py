@@ -42,6 +42,7 @@ def chunk_text(
     heading: str | None = None,
     max_chars: int = 800,
     overlap_chars: int = 80,
+    offset_base: int = 0,
 ) -> list[TextChunk]:
     """按语义边界分块，返回规范化文本坐标。"""
     if max_chars <= 0:
@@ -67,8 +68,8 @@ def chunk_text(
         chunks.append(
             TextChunk(
                 content=content[start:end],
-                source_start=start,
-                source_end=end,
+                source_start=start + offset_base,
+                source_end=end + offset_base,
                 heading=heading,
             )
         )
@@ -79,7 +80,7 @@ def chunk_text(
 
 
 def chunk_law_record(
-    record: dict[str, Any], *, source_key: str
+    record: dict[str, Any], *, source_key: str, offset_base: int = 0
 ) -> list[IngestedChunk]:
     """把法规记录转为带法规来源标签的 Chunk。"""
     law_name = str(record.get("law_name", "")).strip()
@@ -97,7 +98,7 @@ def chunk_law_record(
         "effective_date": record.get("effective_date"),
         "verified_at": record.get("verified_at"),
     }
-    chunks = chunk_text(content, heading=article_number)
+    chunks = chunk_text(content, heading=article_number, offset_base=offset_base)
     return [
         IngestedChunk(
             content=chunk.content,
@@ -115,7 +116,7 @@ def chunk_law_record(
 
 
 def chunk_rule_record(
-    record: dict[str, Any], *, source_key: str, ordinal: int
+    record: dict[str, Any], *, source_key: str, ordinal: int, offset_base: int = 0
 ) -> list[IngestedChunk]:
     """把内部规则记录转为带文件来源标签的 Chunk。"""
     category = str(record.get("category", "")).strip()
@@ -134,7 +135,11 @@ def chunk_rule_record(
         "confidence": record.get("confidence"),
         "rule_source": record.get("source"),
     }
-    chunks = chunk_text(str(record.get("rule_text", "")), heading=category)
+    chunks = chunk_text(
+        str(record.get("rule_text", "")),
+        heading=category,
+        offset_base=offset_base,
+    )
     return [
         IngestedChunk(
             content=chunk.content,
