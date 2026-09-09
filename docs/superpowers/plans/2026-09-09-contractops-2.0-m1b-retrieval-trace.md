@@ -25,7 +25,7 @@
 - Modify: `server/modules/rag/schemas.py`
 - Modify: `tests/v2/test_rag_retriever.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在现有检索测试中增加：
 
@@ -65,13 +65,13 @@ async def test_retrieval_trace_reports_filtering_and_budget(v2_session):
     assert package.trace.query_chars == len(package.query)
 ```
 
-- [ ] **Step 2: 运行失败测试**
+- [x] **Step 2: 运行失败测试**
 
 Run: `python -m pytest tests/v2/test_rag_retriever.py::test_retrieval_trace_reports_filtering_and_budget -q --no-cov`
 
 Expected: FAIL，因为 `ContextPackage` 尚无 `trace` 字段。
 
-- [ ] **Step 3: 实现最小 Trace DTO**
+- [x] **Step 3: 实现最小 Trace DTO**
 
 在 `schemas.py` 的 `ContextPackage` 前增加：
 
@@ -99,7 +99,7 @@ trace: RetrievalTrace = field(default_factory=RetrievalTrace)
 
 保留原有字段和默认值，确保已有调用方无需传入 Trace。
 
-- [ ] **Step 4: 运行 DTO 测试**
+- [x] **Step 4: 运行 DTO 测试**
 
 Run: `python -m pytest tests/v2/test_rag_retriever.py::test_retrieval_trace_reports_filtering_and_budget -q --no-cov`
 
@@ -111,7 +111,7 @@ Expected: 仍可能因计数尚未填充而失败；失败信息应只涉及计�
 - Modify: `server/modules/rag/retriever.py`
 - Modify: `tests/v2/test_rag_retriever.py`
 
-- [ ] **Step 1: 写 Citation 哈希失败测试**
+- [x] **Step 1: 写 Citation 哈希失败测试**
 
 增加一个测试，先摄取或直接写入一个正文为 `"违约责任"`、但 `content_sha256` 为错误 64 位摘要的 Chunk：
 
@@ -135,13 +135,13 @@ async def test_invalid_content_hash_is_dropped_and_requires_review(v2_session):
     assert package.trace.invalid_citation_count == 1
 ```
 
-- [ ] **Step 2: 运行失败测试**
+- [x] **Step 2: 运行失败测试**
 
 Run: `python -m pytest tests/v2/test_rag_retriever.py::test_invalid_content_hash_is_dropped_and_requires_review -q --no-cov`
 
 Expected: FAIL，因为当前 `_citation()` 只检查摘要长度，没有比较正文摘要，也没有把无效引用计入人工复核。
 
-- [ ] **Step 3: 实现最小检索计数和哈希校验**
+- [x] **Step 3: 实现最小检索计数和哈希校验**
 
 在 `retriever.py` 中：
 
@@ -165,13 +165,13 @@ requires_human_review=resolution.requires_human_review or invalid_citation_count
 
 无效引用不能用原始内容作为降级 Citation，也不能让检索请求整体抛异常。
 
-- [ ] **Step 4: 运行 Trace 和 Retriever 测试**
+- [x] **Step 4: 运行 Trace 和 Retriever 测试**
 
 Run: `python -m pytest tests/v2/test_rag_retriever.py -q --no-cov`
 
 Expected: 所有 Retriever 测试通过；Trace 计数与命中列表一致。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add server/modules/rag/schemas.py server/modules/rag/retriever.py tests/v2/test_rag_retriever.py
@@ -184,7 +184,7 @@ git commit -m ":shield: ai-feat(新增) 增加检索Trace与引用哈希校验"
 - Modify: `docs/TECHNICAL.md`
 - Modify: `tests/v2/test_rag_retriever.py` only if the final regression exposes a defect
 
-- [ ] **Step 1: 文档化安全 Trace**
+- [x] **Step 1: 文档化安全 Trace**
 
 在 RAG 或数据安全章节加入以下准确说明：
 
@@ -196,7 +196,7 @@ git commit -m ":shield: ai-feat(新增) 增加检索Trace与引用哈希校验"
 每个 Citation 都会重新计算 Chunk 正文的 SHA-256；摘要不一致的 Chunk 会被丢弃，并把 ContextPackage 标记为 `requires_human_review=true`。这保证后续风险结论不会引用已被篡改或元数据失配的正文。
 ```
 
-- [ ] **Step 2: 运行本地回归**
+- [x] **Step 2: 运行本地回归**
 
 Run: `python -m pytest tests/v2/test_rag_*.py -q --no-cov`
 
@@ -206,7 +206,7 @@ Run: `python -m ruff check server/modules/rag tests/v2 --select E4,E7,E9,F --ign
 
 Expected: `All checks passed!`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```powershell
 git add docs/TECHNICAL.md
@@ -215,10 +215,10 @@ git commit -m ":memo: ai-feat(新增) 记录M1-B检索安全边界"
 
 ## 完成定义
 
-- [ ] `ContextPackage` 向后兼容并携带不含正文的 Trace；
-- [ ] Trace 能区分 ACL 过滤、有效评分、去重、预算跳过和最终命中；
-- [ ] Citation 必须通过正文 SHA-256 校验；
-- [ ] 无效 Citation 被丢弃并触发人工复核；
-- [ ] M1-A 原有测试不回归；
-- [ ] 不新增运行时依赖、不改数据库表、不连接远端服务；
-- [ ] 代码、测试和文档分别形成可独立回滚的提交。
+- [x] `ContextPackage` 向后兼容并携带不含正文的 Trace；
+- [x] Trace 能区分 ACL 过滤、有效评分、去重、预算跳过和最终命中；
+- [x] Citation 必须通过正文 SHA-256 校验；
+- [x] 无效 Citation 被丢弃并触发人工复核；
+- [x] M1-A 原有测试不回归；
+- [x] 不新增运行时依赖、不改数据库表、不连接远端服务；
+- [x] 代码、测试和文档分别形成可独立回滚的提交。
